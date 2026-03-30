@@ -25,9 +25,9 @@ import matter from "gray-matter";
 import { createHash } from "crypto";
 import { BM25 } from "./bm25.js";
 
-const STORE_PATH = process.env.CONTEXT_STORE_PATH
-  ? path.resolve(process.env.CONTEXT_STORE_PATH)
-  : path.join(process.cwd(), ".context");
+const STORE_PATH = process.env.AGENT_STORE_PATH
+  ? path.resolve(process.env.AGENT_STORE_PATH)
+  : path.join(process.cwd(), ".agent-memory-store");
 
 const CHUNKS_DIR = path.join(STORE_PATH, "chunks");
 const STATE_DIR = path.join(STORE_PATH, "state");
