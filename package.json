@@ -1,0 +1,52 @@
+{
+  "name": "agent-store",
+  "version": "0.0.1",
+  "description": "Local-first MCP memory server for multi-agent systems. BM25 search, zero external dependencies, file-based persistence.",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "context-store": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test src/__tests__/store.test.js",
+    "lint": "node --check src/bm25.js src/store.js src/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai-agents",
+    "multi-agent",
+    "memory",
+    "rag",
+    "bm25",
+    "context",
+    "opencode",
+    "claude",
+    "llm"
+  ],
+  "author": "Vinícius Barreto",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vbfs/context-store.git"
+  },
+  "bugs": {
+    "url": "https://github.com/vbfs/context-store/issues"
+  },
+  "homepage": "https://github.com/vbfs/context-store#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "gray-matter": "^4.0.3",
+    "zod": "^4.3.6"
+  }
+}
