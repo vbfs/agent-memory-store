@@ -1,15 +1,13 @@
 /**
- * SQLite database layer powered by sql.js (WASM).
+ * SQLite database layer powered by node:sqlite (built-in).
  *
- * Single-file database at <STORE_PATH>/store.db.
- * BLOB columns for vector embeddings, indexed lookups for CRUD.
- * BM25 search is handled in-memory by bm25.js (sql.js WASM doesn't include FTS5).
- * Debounced flush to disk after mutations (500ms).
+ * Single-file database at <STORE_PATH>/store.db with WAL mode.
+ * FTS5 for full-text BM25 search, BLOB columns for vector embeddings.
+ * Zero external dependencies — uses Node.js native SQLite (>=22.5).
  */
 
-import initSqlJs from "sql.js";
-import fs from "fs/promises";
-import fsSync from "fs";
+import { DatabaseSync } from "node:sqlite";
+import { mkdirSync } from "fs";
 import path from "path";
 
 const STORE_PATH = process.env.AGENT_STORE_PATH
@@ -19,9 +17,10 @@ const STORE_PATH = process.env.AGENT_STORE_PATH
 const DB_PATH = path.join(STORE_PATH, "store.db");
 
 let db = null;
-let flushTimer = null;
 
-const SCHEMA = `
+// ─── Schema ─────────────────────────────────────────────────────────────────
+
+const SCHEMA_TABLES = `
 CREATE TABLE IF NOT EXISTS chunks (
   id         TEXT PRIMARY KEY,
   topic      TEXT NOT NULL,
@@ -46,48 +45,66 @@ CREATE TABLE IF NOT EXISTS state (
 );
 `;
 
-/** Ensures the store directory exists. */
-async function ensureDir() {
-  await fs.mkdir(STORE_PATH, { recursive: true });
-}
+const SCHEMA_FTS = `
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+  id UNINDEXED,
+  topic,
+  tags,
+  agent,
+  content,
+  content='chunks',
+  content_rowid=rowid
+);
+`;
+
+const SCHEMA_TRIGGERS = `
+CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
+  INSERT INTO chunks_fts(rowid, id, topic, tags, agent, content)
+  VALUES (new.rowid, new.id, new.topic, new.tags, new.agent, new.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
+  INSERT INTO chunks_fts(chunks_fts, rowid, id, topic, tags, agent, content)
+  VALUES ('delete', old.rowid, old.id, old.topic, old.tags, old.agent, old.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
+  INSERT INTO chunks_fts(chunks_fts, rowid, id, topic, tags, agent, content)
+  VALUES ('delete', old.rowid, old.id, old.topic, old.tags, old.agent, old.content);
+  INSERT INTO chunks_fts(rowid, id, topic, tags, agent, content)
+  VALUES (new.rowid, new.id, new.topic, new.tags, new.agent, new.content);
+END;
+`;
+
+// ─── Initialization ─────────────────────────────────────────────────────────
 
 /**
- * Initializes (or returns cached) the sql.js database.
- * Loads existing store.db from disk if present, otherwise creates a new one.
+ * Returns the database instance. Creates it on first call.
+ * Synchronous — node:sqlite DatabaseSync is synchronous by design.
  */
-export async function getDb() {
+export function getDb() {
   if (db) return db;
 
-  await ensureDir();
+  mkdirSync(STORE_PATH, { recursive: true });
 
-  const SQL = await initSqlJs();
+  db = new DatabaseSync(DB_PATH);
 
-  try {
-    const buffer = await fs.readFile(DB_PATH);
-    db = new SQL.Database(buffer);
-  } catch {
-    db = new SQL.Database();
-  }
+  // WAL mode for better concurrent read performance
+  db.exec("PRAGMA journal_mode = WAL");
 
-  // Run schema (IF NOT EXISTS makes this idempotent)
-  const statements = SCHEMA.split(";")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  for (const stmt of statements) {
-    db.run(stmt);
-  }
+  // Run schema
+  db.exec(SCHEMA_TABLES);
+  db.exec(SCHEMA_FTS);
+  db.exec(SCHEMA_TRIGGERS);
 
   // Purge expired chunks
-  db.run(
+  db.prepare(
     `DELETE FROM chunks WHERE expires_at IS NOT NULL AND expires_at < datetime('now')`,
-  );
-
-  // Flush after initial cleanup
-  scheduleFlush();
+  ).run();
 
   // Graceful shutdown
   const shutdown = () => {
-    flushSync();
+    if (db) db.close();
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
@@ -96,40 +113,12 @@ export async function getDb() {
   return db;
 }
 
-/** Debounced flush — schedules a write to disk 500ms after the last mutation. */
-function scheduleFlush() {
-  if (flushTimer) clearTimeout(flushTimer);
-  flushTimer = setTimeout(() => flushAsync(), 500);
-}
-
-/** Synchronous flush for shutdown. */
-function flushSync() {
-  if (!db) return;
-  try {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fsSync.writeFileSync(DB_PATH + ".tmp", buffer);
-    fsSync.renameSync(DB_PATH + ".tmp", DB_PATH);
-  } catch {
-    // Best-effort on shutdown
-  }
-}
-
-/** Async flush — atomic write via temp file + rename. */
-async function flushAsync() {
-  if (!db) return;
-  const data = db.export();
-  const buffer = Buffer.from(data);
-  await fs.writeFile(DB_PATH + ".tmp", buffer);
-  await fs.rename(DB_PATH + ".tmp", DB_PATH);
-}
-
 // ─── CRUD Operations ────────────────────────────────────────────────────────
 
 /**
  * Inserts or replaces a chunk in the database.
  */
-export async function insertChunk({
+export function insertChunk({
   id,
   topic,
   agent,
@@ -141,55 +130,51 @@ export async function insertChunk({
   updatedAt,
   expiresAt,
 }) {
-  const d = await getDb();
-  d.run(
+  const d = getDb();
+  d.prepare(
     `INSERT OR REPLACE INTO chunks (id, topic, agent, tags, importance, content, embedding, created_at, updated_at, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      topic,
-      agent,
-      JSON.stringify(tags),
-      importance,
-      content,
-      embedding ? Buffer.from(embedding.buffer) : null,
-      createdAt,
-      updatedAt,
-      expiresAt,
-    ],
+  ).run(
+    id,
+    topic,
+    agent,
+    JSON.stringify(tags),
+    importance,
+    content,
+    embedding ? Buffer.from(embedding.buffer) : null,
+    createdAt,
+    updatedAt,
+    expiresAt,
   );
-  scheduleFlush();
 }
 
 /**
  * Retrieves a single chunk by ID.
  * @returns {object|null}
  */
-export async function getChunk(id) {
-  const d = await getDb();
-  const rows = d.exec(`SELECT * FROM chunks WHERE id = ?`, [id]);
-  if (!rows.length || !rows[0].values.length) return null;
-  return rowToChunk(rows[0].columns, rows[0].values[0]);
+export function getChunk(id) {
+  const d = getDb();
+  const row = d.prepare(`SELECT * FROM chunks WHERE id = ?`).get(id);
+  if (!row) return null;
+  return parseChunkRow(row);
 }
 
 /**
  * Deletes a chunk by ID.
  * @returns {boolean} true if a row was deleted
  */
-export async function deleteChunkById(id) {
-  const d = await getDb();
-  d.run(`DELETE FROM chunks WHERE id = ?`, [id]);
-  const changes = d.getRowsModified();
-  if (changes > 0) scheduleFlush();
-  return changes > 0;
+export function deleteChunkById(id) {
+  const d = getDb();
+  const result = d.prepare(`DELETE FROM chunks WHERE id = ?`).run(id);
+  return result.changes > 0;
 }
 
 /**
  * Lists chunk metadata, with optional agent/tags filters.
  * Sorted by updated_at descending.
  */
-export async function listChunksDb({ agent, tags = [] } = {}) {
-  const d = await getDb();
+export function listChunksDb({ agent, tags = [] } = {}) {
+  const d = getDb();
   let sql = `SELECT id, topic, agent, tags, importance, updated_at FROM chunks`;
   const conditions = [];
   const params = [];
@@ -208,51 +193,58 @@ export async function listChunksDb({ agent, tags = [] } = {}) {
   if (conditions.length) sql += ` WHERE ${conditions.join(" AND ")}`;
   sql += ` ORDER BY updated_at DESC`;
 
-  const rows = d.exec(sql, params);
-  if (!rows.length) return [];
-  return rows[0].values.map((v) => ({
-    id: v[0],
-    topic: v[1],
-    agent: v[2],
-    tags: JSON.parse(v[3]),
-    importance: v[4],
-    updated: v[5],
+  const rows = d.prepare(sql).all(...params);
+  return rows.map((r) => ({
+    id: r.id,
+    topic: r.topic,
+    agent: r.agent,
+    tags: JSON.parse(r.tags),
+    importance: r.importance,
+    updated: r.updated_at,
   }));
 }
 
 /**
- * Loads all chunks for BM25 indexing.
- * Returns id, topic, agent, tags, content for each chunk.
+ * Full-text search via FTS5 (BM25).
+ * Returns ranked results with scores.
  */
-export async function getAllChunksForSearch({ agent, tags = [] } = {}) {
-  const d = await getDb();
-  let sql = `SELECT id, topic, agent, tags, importance, content, updated_at FROM chunks`;
-  const conditions = [];
-  const params = [];
+export function searchFTS({ query, agent, tags = [], topK = 18 }) {
+  const d = getDb();
+
+  // Escape FTS5 special chars and build query
+  const ftsQuery = query
+    .replace(/["*^:(){}[\]]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length > 1)
+    .join(" OR ");
+
+  if (!ftsQuery) return [];
+
+  let sql = `
+    SELECT chunks_fts.id, rank
+    FROM chunks_fts
+    JOIN chunks ON chunks.id = chunks_fts.id
+    WHERE chunks_fts MATCH ?`;
+  const params = [ftsQuery];
 
   if (agent) {
-    conditions.push(`agent = ?`);
+    sql += ` AND chunks.agent = ?`;
     params.push(agent);
   }
 
   if (tags.length > 0) {
-    const tagConditions = tags.map(() => `tags LIKE ?`);
-    conditions.push(`(${tagConditions.join(" OR ")})`);
+    const tagConditions = tags.map(() => `chunks.tags LIKE ?`);
+    sql += ` AND (${tagConditions.join(" OR ")})`;
     params.push(...tags.map((t) => `%"${t}"%`));
   }
 
-  if (conditions.length) sql += ` WHERE ${conditions.join(" AND ")}`;
+  sql += ` ORDER BY rank LIMIT ?`;
+  params.push(topK);
 
-  const rows = d.exec(sql, params);
-  if (!rows.length) return [];
-  return rows[0].values.map((v) => ({
-    id: v[0],
-    topic: v[1],
-    agent: v[2],
-    tags: JSON.parse(v[3]),
-    importance: v[4],
-    content: v[5],
-    updated: v[6],
+  const rows = d.prepare(sql).all(...params);
+  return rows.map((r) => ({
+    id: r.id,
+    score: -r.rank, // FTS5 rank is negative (lower = better), invert
   }));
 }
 
@@ -260,8 +252,8 @@ export async function getAllChunksForSearch({ agent, tags = [] } = {}) {
  * Retrieves all embeddings for vector search.
  * @returns {Array<{ id: string, embedding: Float32Array }>}
  */
-export async function getAllEmbeddings({ agent, tags = [] } = {}) {
-  const d = await getDb();
+export function getAllEmbeddings({ agent, tags = [] } = {}) {
+  const d = getDb();
   let sql = `SELECT id, embedding FROM chunks WHERE embedding IS NOT NULL`;
   const params = [];
 
@@ -276,15 +268,15 @@ export async function getAllEmbeddings({ agent, tags = [] } = {}) {
     params.push(...tags.map((t) => `%"${t}"%`));
   }
 
-  const rows = d.exec(sql, params);
-  if (!rows.length) return [];
-
-  return rows[0].values
-    .filter((v) => v[1] !== null)
-    .map((v) => ({
-      id: v[0],
+  const rows = d.prepare(sql).all(...params);
+  return rows
+    .filter((r) => r.embedding !== null)
+    .map((r) => ({
+      id: r.id,
       embedding: new Float32Array(
-        v[1].buffer.slice(v[1].byteOffset, v[1].byteOffset + v[1].byteLength),
+        r.embedding.buffer,
+        r.embedding.byteOffset,
+        r.embedding.byteLength / 4,
       ),
     }));
 }
@@ -292,56 +284,53 @@ export async function getAllEmbeddings({ agent, tags = [] } = {}) {
 /**
  * Updates only the embedding for a chunk.
  */
-export async function updateEmbedding(id, embedding) {
-  const d = await getDb();
-  d.run(`UPDATE chunks SET embedding = ? WHERE id = ?`, [
+export function updateEmbedding(id, embedding) {
+  const d = getDb();
+  d.prepare(`UPDATE chunks SET embedding = ? WHERE id = ?`).run(
     Buffer.from(embedding.buffer),
     id,
-  ]);
-  scheduleFlush();
+  );
 }
 
 /**
  * Returns chunks that have no embedding yet.
  */
-export async function getChunksWithoutEmbedding() {
-  const d = await getDb();
-  const rows = d.exec(
-    `SELECT id, topic, tags, content FROM chunks WHERE embedding IS NULL`,
-  );
-  if (!rows.length) return [];
-  return rows[0].values.map((v) => ({
-    id: v[0],
-    topic: v[1],
-    tags: v[2],
-    content: v[3],
-  }));
+export function getChunksWithoutEmbedding() {
+  const d = getDb();
+  return d
+    .prepare(
+      `SELECT id, topic, tags, content FROM chunks WHERE embedding IS NULL`,
+    )
+    .all()
+    .map((r) => ({
+      id: r.id,
+      topic: r.topic,
+      tags: r.tags,
+      content: r.content,
+    }));
 }
 
 // ─── State Operations ───────────────────────────────────────────────────────
 
-export async function getStateDb(key) {
-  const d = await getDb();
-  const rows = d.exec(`SELECT value FROM state WHERE key = ?`, [key]);
-  if (!rows.length || !rows[0].values.length) return null;
-  return JSON.parse(rows[0].values[0][0]);
+export function getStateDb(key) {
+  const d = getDb();
+  const row = d.prepare(`SELECT value FROM state WHERE key = ?`).get(key);
+  if (!row) return null;
+  return JSON.parse(row.value);
 }
 
-export async function setStateDb(key, value) {
-  const d = await getDb();
+export function setStateDb(key, value) {
+  const d = getDb();
   const updatedAt = new Date().toISOString();
-  d.run(
+  d.prepare(
     `INSERT OR REPLACE INTO state (key, value, updated_at) VALUES (?, ?, ?)`,
-    [key, JSON.stringify(value), updatedAt],
-  );
-  scheduleFlush();
+  ).run(key, JSON.stringify(value), updatedAt);
   return { key, updated: updatedAt };
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function rowToChunk(columns, values) {
-  const row = Object.fromEntries(columns.map((c, i) => [c, values[i]]));
+function parseChunkRow(row) {
   return {
     id: row.id,
     topic: row.topic,
@@ -351,10 +340,9 @@ function rowToChunk(columns, values) {
     content: row.content,
     embedding: row.embedding
       ? new Float32Array(
-          row.embedding.buffer.slice(
-            row.embedding.byteOffset,
-            row.embedding.byteOffset + row.embedding.byteLength,
-          ),
+          row.embedding.buffer,
+          row.embedding.byteOffset,
+          row.embedding.byteLength / 4,
         )
       : null,
     createdAt: row.created_at,

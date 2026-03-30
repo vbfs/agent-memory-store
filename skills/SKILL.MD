@@ -25,17 +25,35 @@ in the store — not just in the current conversation.
 
 ---
 
+## Search modes — choosing the right one
+
+The memory store supports three search modes via the `search_mode` parameter:
+
+| Mode | When to use | How it works |
+|---|---|---|
+| `hybrid` (default) | General retrieval — best quality | BM25 keyword ranking + semantic similarity, merged via Reciprocal Rank Fusion |
+| `bm25` | Exact term lookups, canonical tags, known keywords | SQLite FTS5 full-text search — fast, deterministic |
+| `semantic` | Conceptual similarity, when exact terms are unknown | Vector cosine similarity using local embeddings (384-dim) |
+
+**Guidelines:**
+
+- Use `hybrid` (default) unless you have a specific reason not to. It combines the strengths of both approaches.
+- Use `bm25` when you know the exact tags or terminology used in the stored chunks. It's faster and more precise for keyword matches.
+- Use `semantic` when you need to find chunks that are conceptually related but may use different terminology (e.g., searching for "authentication" when chunks use "login flow").
+
+---
+
 ## The two questions to ask before every action
 
 Before taking any substantive action, ask:
 
 1. **"Is there something in memory I should know before I act?"**
-   → If yes, or if uncertain: **READ first**.
+   -> If yes, or if uncertain: **READ first**.
 
 2. **"Will the result of this action be needed later — by me or another agent?"**
-   → If yes: **WRITE after**.
+   -> If yes: **WRITE after**.
 
-If both answers are yes, the pattern is: **read → act → write**.
+If both answers are yes, the pattern is: **read -> act -> write**.
 
 ---
 
@@ -105,9 +123,9 @@ Use adaptive `top_k`: higher for broad orientation, lower for targeted lookups.
 
 ```
 Incoming: "Build the property scoring module"
-→ search_context({ query: "scoring module requirements criteria", topK: 8 })
-→ search_context({ query: "data schema input fields", topK: 5 })
-→ Incorporate findings before writing a single line of code
+-> search_context({ query: "scoring module requirements criteria", topK: 8 })
+-> search_context({ query: "data schema input fields", topK: 5 })
+-> Incorporate findings before writing a single line of code
 ```
 
 **Why:** Acting without checking memory risks duplicating work, contradicting
@@ -123,7 +141,7 @@ before assuming.
 
 ```
 Incoming: "The scraper is hitting rate limits again on ZAP"
-→ search_context({ query: "ZAP rate limit scraper config", tags: ["scraper", "zap", "config"] })
+-> search_context({ query: "ZAP rate limit scraper config", tags: ["scraper", "zap", "config"] })
 ```
 
 Named entities are the clearest signal that prior work exists in memory.
@@ -139,8 +157,11 @@ stop and search. Uncertainty is a read trigger.
 
 ```
 Internal signal: "I think the pagination param was 'offset' but I'm not sure"
-→ search_context({ query: "API pagination parameters", agent: "scraper-agent", topK: 3 })
+-> search_context({ query: "API pagination parameters", agent: "scraper-agent", topK: 3 })
 ```
+
+**Tip:** If you're uncertain about terminology, use `search_mode: "semantic"` to
+find conceptually related chunks even when exact terms don't match.
 
 **Why:** Guessing when the answer exists in memory is the failure mode that
 makes multi-agent systems unreliable. Prefer one extra search over one wrong assumption.
@@ -153,9 +174,9 @@ When you receive a handoff message, always read state and search for the
 outputs and decisions from the sending agent before continuing.
 
 ```
-Handoff: "HANDOFF Scraper→Analyzer | run-019 | ✅ | 143 listings | File: data/raw-019.json"
-→ get_state("pipeline_run_019")
-→ search_context({ query: "scraper run 019 output decisions", topK: 5 })
+Handoff: "HANDOFF Scraper->Analyzer | run-019 | OK | 143 listings | File: data/raw-019.json"
+-> get_state("pipeline_run_019")
+-> search_context({ query: "scraper run 019 output decisions", topK: 5 })
 ```
 
 The handoff message is a pointer, not a full briefing. The full context lives
@@ -171,8 +192,8 @@ read state and search before acting.
 
 ```
 Incoming: "Resume the DOU pipeline, we stopped mid-processing"
-→ get_state("dou_pipeline_current_phase")
-→ search_context({ query: "DOU pipeline phase output last run", topK: 5 })
+-> get_state("dou_pipeline_current_phase")
+-> search_context({ query: "DOU pipeline phase output last run", topK: 5 })
 ```
 
 ---
@@ -183,10 +204,10 @@ Do not use a fixed `topK` for all searches. Match it to the purpose:
 
 | Search purpose | Recommended top_k |
 |---|---|
-| Broad orientation (new task, first session) | 8–10 |
-| Targeted lookup (named entity, specific config) | 3–5 |
+| Broad orientation (new task, first session) | 8-10 |
+| Targeted lookup (named entity, specific config) | 3-5 |
 | Deduplication check before writing | 3 |
-| Handoff context retrieval | 5–6 |
+| Handoff context retrieval | 5-6 |
 
 Higher `top_k` costs more tokens. Use it when orientation matters.
 Use lower values when you know exactly what you're looking for.
@@ -204,7 +225,7 @@ need the *why*, not just the *what*.
 ```
 write_context({
   topic: "Real estate pipeline — chose SQLite over flat JSON for listing store",
-  content: "Chose SQLite for local listing persistence. Rationale: need deduplication by listing ID across runs; flat JSON requires full reload. Using better-sqlite3. Schema: listings(id, portal, url, price, area, score, created_at).",
+  content: "Chose SQLite for local listing persistence. Rationale: need deduplication by listing ID across runs; flat JSON requires full reload. Using node:sqlite. Schema: listings(id, portal, url, price, area, score, created_at).",
   tags: ["architecture", "decision", "database", "real-estate"],
   importance: "critical"
 })
@@ -222,15 +243,8 @@ configurations applied, or any artifact that will be referenced downstream.
 ```
 write_context({
   topic: "Scraper run 019 — 143 ZAP listings collected",
-  content: "Raw file: data/raw-019.json. Portal: ZAP Imóveis. Filters: SP capital, 2+ quartos, até R$800k. Rate: 1 req/s (enforced after 429 in run 018). Zero blocks this run.",
+  content: "Raw file: data/raw-019.json. Portal: ZAP. Filters: SP capital, 2+ bedrooms, up to R$800k. Rate: 1 req/s (enforced after 429 in run 018). Zero blocks this run.",
   tags: ["scraper", "zap", "output", "real-estate"],
-  importance: "high"
-})
-
-write_context({
-  topic: "VoC pipeline — NPS survey batch processed",
-  content: "Batch: 2025-Q2. 847 responses. Themes extracted: onboarding friction (38%), pricing clarity (22%), missing integrations (19%). Output: data/voc-q2-themes.json. Sentiment model: claude-sonnet.",
-  tags: ["voc", "nps", "output", "q2-2025"],
   importance: "high"
 })
 ```
@@ -259,13 +273,13 @@ write_context({
 
 Before passing control to the next agent or completing your turn in a
 multi-step pipeline, write your state. Think of it as "committing" your work.
-The sequence is always: **write output chunk → update state → send handoff**.
+The sequence is always: **write output chunk -> update state -> send handoff**.
 
 ```
 # Step 1 — persist your output
 write_context({
   topic: "Analyzer run 019 — shortlist of 11 properties",
-  content: "143 listings analyzed. Shortlist: 11. File: data/shortlist-019.json. Criteria: preço/m² abaixo da mediana do bairro, score de transporte > 7, sem flags legais no registro.",
+  content: "143 listings analyzed. Shortlist: 11. File: data/shortlist-019.json. Criteria: price/sqm below neighborhood median, transport score > 7, no legal flags.",
   tags: ["analyzer", "real-estate", "output"],
   importance: "high"
 })
@@ -280,7 +294,7 @@ set_state("pipeline_current_phase", {
 })
 
 # Step 3 — send minimal handoff (the detail is in memory)
-# HANDOFF Analyzer→Notifier | run-019 | ✅ | 11 shortlisted | File: data/shortlist-019.json
+# HANDOFF Analyzer->Notifier | run-019 | OK | 11 shortlisted | File: data/shortlist-019.json
 ```
 
 **Why this order:** if the handoff is sent before the write, the receiving agent
@@ -291,12 +305,12 @@ may search memory before the chunk exists and proceed with incomplete context.
 ## The deduplication rule — always search before writing
 
 Before writing a new chunk, search for an existing one on the same topic.
-If a chunk already exists with score > 1.5, **update by deleting and rewriting**
-rather than creating a duplicate.
+If a chunk already exists, **update by deleting and rewriting** rather than
+creating a duplicate.
 
 ```
 # Before writing about "OLX scraper config":
-results = search_context({ query: "OLX scraper config rate limit", topK: 3, min_score: 1.5 })
+results = search_context({ query: "OLX scraper config rate limit", topK: 3 })
 
 if results:
     delete_context(results[0].id)   # remove stale version
@@ -311,21 +325,23 @@ One chunk per topic, kept current.
 
 ## Zero results — what it means and what to do
 
-When `search_context` returns empty or all scores are below `0.1`, do not
-assume there is nothing to know. There are two interpretations:
+When `search_context` returns empty, do not assume there is nothing to know.
+There are two interpretations:
 
 1. **You are the first agent to touch this topic** — you have a responsibility
    to write the foundational chunk after completing your work.
 
 2. **Tags or query terms don't match what was written** — try alternate terms
-   before concluding memory is empty.
+   or switch to `search_mode: "semantic"` before concluding memory is empty.
 
 ```
 # First attempt returns nothing:
-search_context({ query: "DOU monitoring config regex", topK: 5 })  → []
+search_context({ query: "DOU monitoring config regex", topK: 5 })  -> []
 
-# Retry with alternates before concluding:
-search_context({ query: "diario oficial scraper rules", topK: 5 })
+# Retry with semantic search for conceptual match:
+search_context({ query: "official gazette scraper rules", topK: 5, search_mode: "semantic" })
+
+# Retry with tag filter:
 search_context({ query: "DOU pipeline setup", tags: ["dou"] })
 
 # If still empty — you are the first. Write the foundational chunk after acting.
@@ -339,12 +355,13 @@ invitation to build it.
 ## Tag discipline — the contract between agents
 
 Tags are how agents find each other's work. A tag written as `auth` and
-searched as `authentication` produces no match. Tags must be agreed upon
-and used consistently across all agents in a pipeline.
+searched as `authentication` produces no match in BM25 mode (though semantic
+search can bridge this gap). Tags must be agreed upon and used consistently
+across all agents in a pipeline.
 
 **Principles:**
 - Use short, lowercase, hyphen-free terms: `auth`, `scraper`, `config`, not `authentication-service`
-- Prefer the canonical project or system name: `dou`, `zap`, `olx`, `voc`, `terminalos`
+- Prefer the canonical project or system name: `dou`, `zap`, `olx`, `voc`
 - Always include the chunk type: `decision`, `config`, `output`, `discovery`
 - Never invent a new tag when an existing one covers it
 - Load `get_state("project_tags")` during onboarding — don't guess the vocabulary
@@ -352,7 +369,7 @@ and used consistently across all agents in a pipeline.
 **Defining the vocabulary at project start:**
 ```
 get_state("project_tags")
-# → if null, you are the first agent. Define and persist:
+# -> if null, you are the first agent. Define and persist:
 set_state("project_tags", [
   "decision", "config", "output", "discovery", "meta", "onboarding",
   "scraper", "analyzer", "notifier",       // agent roles
@@ -382,8 +399,8 @@ get ignored during curation; overdeclaring is a much smaller problem.
 Most chunks should be **permanent** (no `ttl_days`). Use TTL only for:
 
 - Session-scoped scratch notes (`ttl_days: 1`)
-- Rate limit observations that change frequently (`ttl_days: 7–14`)
-- Portal scraping configs that may drift (`ttl_days: 30–60`)
+- Rate limit observations that change frequently (`ttl_days: 7-14`)
+- Portal scraping configs that may drift (`ttl_days: 30-60`)
 - Run-specific outputs in high-frequency pipelines (`ttl_days: 30`)
 - Anything explicitly temporary
 
@@ -410,7 +427,7 @@ explanation is much less useful than one that explains why Redis was chosen
 over alternatives. Future agents need context to know whether a decision
 still applies.
 
-**Don't ignore low-score results.** A result with score 0.4 might still be
+**Don't ignore low-score results.** A result with a low score might still be
 the only chunk on a topic. Read the top result even when scores are low —
 just weight it accordingly.
 
@@ -418,41 +435,45 @@ just weight it accordingly.
 `topK: 3` and a deduplication check with `topK: 10` are both wrong. Match
 `top_k` to the purpose — see the adaptive guide above.
 
+**Don't default to `bm25` mode out of habit.** The `hybrid` default exists
+for a reason — it catches both keyword matches and semantic similarities.
+Only override when you have a specific reason.
+
 ---
 
 ## Quick reference — read/write decision
 
 ```
 First session on project
-  └─ get_state("project_tags") → search_context("project overview") → search_context("[my role]")
+  -> get_state("project_tags") -> search_context("project overview") -> search_context("[my role]")
 
 New task arrives
-  └─ search_context (2-3 queries, topK 8) → incorporate → act
+  -> search_context (2-3 queries, topK 8) -> incorporate -> act
 
 Named entity in input
-  └─ search_context (entity name + tags, topK 5)
+  -> search_context (entity name + tags, topK 5)
 
 Feeling uncertain
-  └─ search_context (topic of uncertainty, topK 3) → retry with alternates if empty
+  -> search_context (topic of uncertainty, topK 3) -> retry with semantic mode if empty
 
 Handoff received
-  └─ get_state (run/pipeline ID) + search_context (topK 5-6)
+  -> get_state (run/pipeline ID) + search_context (topK 5-6)
 
 Zero results returned
-  └─ retry with alternate terms → if still empty: act, then write foundational chunk
+  -> retry with semantic mode or alternate terms -> if still empty: act, then write foundational chunk
 
 Decision made
-  └─ write_context (topic, content with rationale, tags, importance: high/critical)
+  -> write_context (topic, content with rationale, tags, importance: high/critical)
 
 Subtask complete
-  └─ write_context (output description + file path + key facts)
+  -> write_context (output description + file path + key facts)
 
 Discovery made
-  └─ write_context (what changed + impact, ttl_days if temporary)
+  -> write_context (what changed + impact, ttl_days if temporary)
 
 Turn ending in pipeline
-  └─ write_context (output) → set_state (next phase + agent) → send handoff
+  -> write_context (output) -> set_state (next phase + agent) -> send handoff
 
 Before writing
-  └─ search_context (topK 3, min_score 1.5) → delete stale → write fresh
+  -> search_context (topK 3) -> delete stale -> write fresh
 ```

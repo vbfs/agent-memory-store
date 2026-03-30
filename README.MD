@@ -1,48 +1,49 @@
 # agent-memory-store
 
-> Local-first MCP memory server for multi-agent systems.
+> High-performance MCP memory server for multi-agent systems — SQLite-backed with hybrid search.
 
 [![npm version](https://img.shields.io/npm/v/agent-memory-store.svg)](https://www.npmjs.com/package/agent-memory-store)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18-green.svg)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.5-green.svg)](https://nodejs.org)
 
-`agent-memory-store` gives your AI agents a shared, searchable, persistent memory — running entirely on your local filesystem. No vector database, no embedding APIs, no cloud services required.
+`agent-memory-store` gives your AI agents a shared, searchable, persistent memory — powered by SQLite with native FTS5 full-text search and optional semantic embeddings. No external services required.
 
-Agents read and write **chunks** (markdown files with YAML frontmatter) through a set of MCP tools. Search is powered by **BM25**, the same ranking algorithm used by Elasticsearch, implemented in pure JavaScript with zero runtime dependencies.
+Agents read and write **chunks** through MCP tools. Search combines **BM25 ranking** (via SQLite FTS5) with **semantic vector similarity** (via local embeddings), merged through Reciprocal Rank Fusion for best-of-both-worlds retrieval.
 
 ```
                  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
                  │   Agent A   │   │   Agent B   │   │   Agent C   │
                  └──────┬──────┘   └──────┬──────┘   └──────┬──────┘
                         │                 │                  │
-                        └────────────────┬─────────────────-┘
+                        └────────────────┬──────────────────┘
                                          │  MCP tools
                               ┌──────────▼──────────┐
-                              │   agent-memory-store  │
-                              │  search · write       │
-                              │  read · state · list  │
+                              │  agent-memory-store  │
+                              │  hybrid search       │
+                              │  BM25 + semantic     │
                               └──────────┬──────────┘
                                          │
                               ┌──────────▼──────────┐
                               │  .agent-memory-store/ │
-                              │  ├── chunks/          │
-                              │  └── state/           │
-                              └──────────────────────┘
+                              │  └── store.db         │
+                              └───────────────────────┘
 ```
 
 ## Features
 
 - **Zero-install usage** via `npx`
-- **BM25 full-text search** — relevance ranking without embeddings or APIs
+- **Hybrid search** — BM25 full-text (FTS5) + semantic vector similarity + Reciprocal Rank Fusion
+- **SQLite-backed** — single `store.db` file, WAL mode, native performance
+- **Local embeddings** — 384-dim vectors via `all-MiniLM-L6-v2`, no API keys needed
 - **Tag and agent filtering** — find chunks by who wrote them or what they cover
 - **TTL-based expiry** — chunks auto-delete after a configurable number of days
 - **Session state** — key/value store for pipeline progress, flags, and counters
-- **Plain files** — chunks are `.md` files, readable and editable by humans and git
-- **MCP-native** — works with Claude Code, opencode, and any MCP-compatible client
+- **MCP-native** — works with Claude Code, opencode, Cursor, and any MCP-compatible client
+- **Zero external database dependencies** — uses Node.js built-in SQLite (`node:sqlite`)
 
 ## Requirements
 
-- Node.js ≥ 18
+- Node.js >= 22.5 (required for native `node:sqlite` with FTS5 support)
 
 ## Quick start
 
@@ -52,13 +53,25 @@ No installation needed:
 npx agent-memory-store
 ```
 
-By default, memory is stored in `.agent-memory-store/` inside the directory where the server starts — so each project gets its own isolated store automatically.
+By default, memory is stored in `.agent-memory-store/store.db` inside the directory where the server starts — so each project gets its own isolated store automatically.
 
 To use a custom path:
 
 ```bash
 AGENT_STORE_PATH=/your/project/.agent-memory-store npx agent-memory-store
 ```
+
+## Performance
+
+Benchmarked on Apple Silicon (Node v25, darwin arm64):
+
+| Operation | 100 chunks | 1K chunks | 5K chunks | 10K chunks |
+|-----------|-----------|-----------|-----------|------------|
+| **write** | 2.16 ms | 0.15 ms | 0.15 ms | 0.15 ms |
+| **read** | 0.02 ms | 0.02 ms | 0.02 ms | 0.02 ms |
+| **search (BM25)** | 0.4 ms | 1.2 ms | 5.3 ms | 9.9 ms |
+| **list** | 0.2 ms | 1.4 ms | 9.9 ms | 14.7 ms |
+| **state get/set** | 0.03 ms | 0.03 ms | 0.03 ms | 0.03 ms |
 
 ## Configuration
 
@@ -155,31 +168,40 @@ If you need to store memory outside the project directory, set `AGENT_STORE_PATH
 
 ### Environment variables
 
-| Variable           | Default                 | Description                                                        |
-| ------------------ | ----------------------- | ------------------------------------------------------------------ |
+| Variable | Default | Description |
+|---|---|---|
 | `AGENT_STORE_PATH` | `./.agent-memory-store` | Custom path to the storage directory. Omit to use project default. |
 
 ## Tools
 
-| Tool             | When to use                                                               |
-| ---------------- | ------------------------------------------------------------------------- |
+| Tool | When to use |
+|---|---|
 | `search_context` | **Start of every task** — retrieve relevant prior knowledge before acting |
-| `write_context`  | After decisions, discoveries, or outputs that other agents will need      |
-| `read_context`   | Read a specific chunk by ID                                               |
-| `list_context`   | Inventory the memory store (metadata only, no body)                       |
-| `delete_context` | Remove outdated or incorrect chunks                                       |
-| `get_state`      | Read a pipeline variable (progress, flags, counters)                      |
-| `set_state`      | Write a pipeline variable                                                 |
+| `write_context` | After decisions, discoveries, or outputs that other agents will need |
+| `read_context` | Read a specific chunk by ID |
+| `list_context` | Inventory the memory store (metadata only, no body) |
+| `delete_context` | Remove outdated or incorrect chunks |
+| `get_state` | Read a pipeline variable (progress, flags, counters) |
+| `set_state` | Write a pipeline variable |
 
 ### `search_context`
 
 ```
-query      string    Search query. Use specific, canonical terms.
-tags       string[]  (optional) Narrow to chunks matching any of these tags.
-agent      string    (optional) Narrow to chunks written by a specific agent.
-top_k      number    (optional) Max results to return. Default: 6.
-min_score  number    (optional) Minimum BM25 score. Default: 0.1.
+query        string    Search query. Use specific, canonical terms.
+tags         string[]  (optional) Narrow to chunks matching any of these tags.
+agent        string    (optional) Narrow to chunks written by a specific agent.
+top_k        number    (optional) Max results to return. Default: 6.
+min_score    number    (optional) Minimum relevance score. Default: 0.1.
+search_mode  string    (optional) "hybrid" (default), "bm25", or "semantic".
 ```
+
+**Search modes:**
+
+| Mode | How it works | Best for |
+|---|---|---|
+| `hybrid` | BM25 + semantic similarity merged via Reciprocal Rank Fusion | General use (default) |
+| `bm25` | FTS5 keyword matching only | Exact term lookups, canonical tags |
+| `semantic` | Vector cosine similarity only | Finding conceptually related chunks |
 
 ### `write_context`
 
@@ -199,33 +221,42 @@ key    string   State variable name.
 value  any      (set_state only) Any JSON-serializable value.
 ```
 
-## Storage format
+## Architecture
 
-Each chunk is a plain `.md` file under `.agent-memory-store/chunks/`:
-
-```markdown
----
-id: a3f9c12b40
-topic: "Auth service — chose JWT over sessions"
-agent: architect-agent
-tags: [auth, architecture, decision]
-importance: high
-updated: 2025-06-01T14:32:00.000Z
----
-
-Chose stateless JWT over server-side sessions.
-
-**Rationale:** No shared session store needed across services.
-Refresh tokens stored in Redis with 7-day TTL.
-Access tokens expire in 15 minutes.
-
-**Trade-offs:** Cannot invalidate individual tokens before expiry.
-Acceptable for our threat model.
+```
+src/
+  index.js        MCP server — tool registration and transport
+  store.js        Public API — searchChunks, writeChunk, readChunk, etc.
+  db.js           SQLite layer — node:sqlite with FTS5, WAL mode
+  search.js       Hybrid search — FTS5 BM25 + vector similarity + RRF
+  embeddings.js   Local embeddings — @huggingface/transformers (all-MiniLM-L6-v2)
+  bm25.js         Pure JS BM25 — kept as fallback reference
+  migrate.js      Filesystem → SQLite migration (automatic, one-time)
 ```
 
-Session state lives in `.agent-memory-store/state/<key>.json`.
+### Storage format
 
-Both directories are human-readable, diffable with git, and can be committed to version control if you want shared team memory.
+All data lives in a single SQLite database at `.agent-memory-store/store.db`:
+
+- **chunks table** — id, topic, agent, tags (JSON), importance, content, embedding (BLOB), timestamps, expiry
+- **chunks_fts** — FTS5 virtual table synced via triggers for full-text search
+- **state table** — key/value pairs for pipeline variables
+
+WAL mode is enabled for concurrent read performance. No manual flush needed.
+
+### How hybrid search works
+
+1. **BM25 (FTS5)** — SQLite's native full-text search ranks chunks by term frequency and inverse document frequency. Fast, deterministic, great for exact keyword matches.
+
+2. **Semantic similarity** — Query and chunks are embedded into 384-dimensional vectors using `all-MiniLM-L6-v2` (runs locally via ONNX Runtime). Cosine similarity finds conceptually related chunks even when exact terms don't match.
+
+3. **Reciprocal Rank Fusion** — Both ranked lists are merged using RRF with weights (BM25: 0.4, semantic: 0.6). Documents appearing in both lists get boosted.
+
+The embedding model (~23MB) is downloaded automatically on first use and cached in `~/.cache/huggingface/`. If the model fails to load, the system falls back to BM25-only search transparently.
+
+### Migration from filesystem
+
+If you're upgrading from a previous version that used `.md` files, the migration happens automatically on first startup. Your existing chunks and state are imported into SQLite, and the old directories are renamed to `chunks_backup/` and `state_backup/`.
 
 ## Agent system prompt
 
@@ -238,8 +269,8 @@ You have access to a persistent local memory store via agent-memory-store MCP to
 
 **At the start of each task:**
 
-1. Call `search_context` with 2–3 specific queries related to what you are about to do.
-2. Incorporate retrieved chunks (score > 1.0) into your reasoning.
+1. Call `search_context` with 2-3 specific queries related to what you are about to do.
+2. Incorporate retrieved chunks into your reasoning.
 3. Call `get_state` to check pipeline status if relevant.
 
 **After completing a subtask:**
@@ -254,32 +285,12 @@ You have access to a persistent local memory store via agent-memory-store MCP to
 **Best practices:**
 
 - Specific topics: "ZAP scraper — stack decision" > "decision"
-- Consistent tags: always use the same term (`auth`, not `authentication` or `autenticação`)
+- Consistent tags: always use the same term (`auth`, not `authentication`)
 - Check before writing: search first to avoid duplicate chunks
 - Temporary context: use `ttl_days: 7` for session-scoped information
+- Use `search_mode: "semantic"` when looking for conceptually related chunks
+- Use `search_mode: "bm25"` for exact tag/keyword lookups
 ```
-
-## How BM25 search works
-
-BM25 ranks documents by term frequency and inverse document frequency, normalized by document length. It is the ranking algorithm behind Elasticsearch and Apache Lucene.
-
-**Strengths:**
-
-- Works well for short, labeled text chunks
-- Instant — no network calls, no GPU, no warm-up
-- Deterministic and explainable
-
-**Limitations:**
-
-- No semantic understanding (`car` ≠ `automobile`)
-- Mitigated by using canonical tags and consistent terminology across agents
-
-**Score interpretation:**
-
-- `> 3.0` — strong match, highly relevant
-- `1.0 – 3.0` — good match, likely relevant
-- `0.1 – 1.0` — weak match, may be tangentially related
-- `< 0.1` — filtered out by default
 
 ## Development
 
@@ -296,22 +307,20 @@ Run tests:
 npm test
 ```
 
+Run benchmark:
+
+```bash
+node benchmark.js
+```
+
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
-
-## Project structure
-
-```
-src/
-  bm25.js      BM25 ranking engine — pure JS, zero dependencies
-  store.js     File-based persistence (chunks + session state)
-  index.js     MCP server and tool definitions
-```
 
 ## Roadmap
 
 - [ ] `summarize_context` tool — LLM-powered chunk consolidation
 - [ ] `prune_context` tool — remove chunks by age, agent, or importance
-- [ ] Hybrid scoring: BM25 + optional local embedding reranking (ollama)
+- [x] ~~Hybrid scoring: BM25 + local embedding reranking~~ — shipped in v0.1.0
+- [x] ~~SQLite-backed storage~~ — shipped in v0.1.0
 - [ ] Web UI for browsing the memory store
 - [ ] Multi-project workspace support
 

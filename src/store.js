@@ -18,7 +18,7 @@ import {
   updateEmbedding,
   getChunksWithoutEmbedding,
 } from "./db.js";
-import { hybridSearch, invalidateBm25Cache } from "./search.js";
+import { hybridSearch } from "./search.js";
 import { embed, prepareText, warmup } from "./embeddings.js";
 import { migrateIfNeeded } from "./migrate.js";
 
@@ -28,7 +28,7 @@ import { migrateIfNeeded } from "./migrate.js";
  */
 export async function initStore() {
   // Ensure DB is ready (also runs schema + expiry purge)
-  await getDb();
+  getDb();
 
   // Migrate from filesystem if needed
   await migrateIfNeeded();
@@ -41,7 +41,7 @@ export async function initStore() {
  * Background task: computes embeddings for chunks that don't have one yet.
  */
 async function backfillEmbeddings() {
-  const chunks = await getChunksWithoutEmbedding();
+  const chunks = getChunksWithoutEmbedding();
   if (!chunks.length) return;
 
   process.stderr.write(
@@ -56,7 +56,7 @@ async function backfillEmbeddings() {
     });
     const embedding = await embed(text);
     if (embedding) {
-      await updateEmbedding(chunk.id, embedding);
+      updateEmbedding(chunk.id, embedding);
     }
   }
 
@@ -128,7 +128,7 @@ export async function writeChunk({
     ? new Date(Date.now() + ttlDays * 86_400_000).toISOString()
     : null;
 
-  await insertChunk({
+  insertChunk({
     id,
     topic,
     agent,
@@ -140,8 +140,6 @@ export async function writeChunk({
     updatedAt: now,
     expiresAt,
   });
-
-  invalidateBm25Cache();
 
   // Compute embedding in background (non-blocking)
   const text = prepareText({ topic, tags, content });
@@ -159,7 +157,7 @@ export async function writeChunk({
  * @returns {Promise<{ meta: object, content: string } | null>}
  */
 export async function readChunk(id) {
-  const chunk = await getChunk(id);
+  const chunk = getChunk(id);
   if (!chunk) return null;
 
   return {
@@ -183,9 +181,7 @@ export async function readChunk(id) {
  * @returns {Promise<boolean>}
  */
 export async function deleteChunk(id) {
-  const result = await deleteChunkById(id);
-  if (result) invalidateBm25Cache();
-  return result;
+  return deleteChunkById(id);
 }
 
 /**

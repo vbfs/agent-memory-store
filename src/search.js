@@ -1,85 +1,16 @@
 /**
- * Hybrid search engine combining BM25 (in-memory cached) and vector similarity.
+ * Hybrid search engine combining FTS5 BM25 (native SQLite) and vector similarity.
  *
  * Search modes:
- *   - "hybrid"   — BM25 + vector cosine similarity merged via Reciprocal Rank Fusion
- *   - "bm25"     — BM25 only (no embeddings needed)
+ *   - "hybrid"   — FTS5 BM25 + vector cosine similarity merged via Reciprocal Rank Fusion
+ *   - "bm25"     — FTS5 only (no embeddings needed)
  *   - "semantic"  — Vector similarity only
  *
- * BM25 index is cached in memory and rebuilt only when chunks change (version bump).
  * Falls back to BM25-only if embeddings are not available.
  */
 
-import { getAllChunksForSearch, getAllEmbeddings, getChunk } from "./db.js";
-import { BM25 } from "./bm25.js";
+import { searchFTS, getAllEmbeddings, getChunk } from "./db.js";
 import { embed, isEmbeddingAvailable } from "./embeddings.js";
-
-// ─── BM25 Index Cache ───────────────────────────────────────────────────────
-
-let cachedBm25Engine = null;
-let cachedBm25Version = 0;
-let currentVersion = 0;
-
-/**
- * Invalidates the BM25 cache. Call after any write/delete.
- */
-export function invalidateBm25Cache() {
-  currentVersion++;
-}
-
-/**
- * Returns a BM25 engine, rebuilding only if chunks changed.
- * For filtered queries (agent/tags), we still use the global index
- * but apply filters at search time — avoids rebuilding per filter combo.
- */
-async function getBm25Engine() {
-  if (cachedBm25Engine && cachedBm25Version === currentVersion) {
-    return cachedBm25Engine;
-  }
-
-  const chunks = await getAllChunksForSearch();
-  const engine = new BM25();
-
-  for (const c of chunks) {
-    const searchText = [
-      c.topic || "",
-      (c.tags || []).join(" "),
-      c.agent || "",
-      c.content,
-    ].join(" ");
-    engine.addDocument(c.id, searchText, {
-      id: c.id,
-      agent: c.agent,
-      tags: c.tags,
-    });
-  }
-
-  cachedBm25Engine = engine;
-  cachedBm25Version = currentVersion;
-  return engine;
-}
-
-/**
- * BM25 search using the cached global index with optional filters.
- */
-async function bm25Search({ query, agent, tags = [], topK = 18 }) {
-  const engine = await getBm25Engine();
-  if (!engine.documents.length) return [];
-
-  const hasFilter = !!agent || tags.length > 0;
-  const filter = hasFilter
-    ? (meta) => {
-        if (agent && meta.agent !== agent) return false;
-        if (tags.length > 0 && !tags.some((t) => (meta.tags || []).includes(t)))
-          return false;
-        return true;
-      }
-    : null;
-
-  return engine
-    .search(query, topK, filter)
-    .map(({ id, score }) => ({ id, score }));
-}
 
 // ─── Vector Search ──────────────────────────────────────────────────────────
 
@@ -96,8 +27,8 @@ function cosineSimilarity(a, b) {
 /**
  * Brute-force vector search over all chunk embeddings.
  */
-async function vectorSearch(queryEmbedding, { agent, tags = [], topK = 18 }) {
-  const embeddings = await getAllEmbeddings({ agent, tags });
+function vectorSearch(queryEmbedding, { agent, tags = [], topK = 18 }) {
+  const embeddings = getAllEmbeddings({ agent, tags });
   if (!embeddings.length) return [];
 
   return embeddings
@@ -166,30 +97,28 @@ export async function hybridSearch({
   let fusedResults;
 
   if (effectiveMode === "bm25") {
-    const bm25Hits = await bm25Search({ query, agent, tags, topK: candidateK });
-    fusedResults = bm25Hits;
+    fusedResults = searchFTS({ query, agent, tags, topK: candidateK });
   } else if (effectiveMode === "semantic") {
     const queryEmbedding = await embed(query);
     if (!queryEmbedding) {
-      fusedResults = await bm25Search({ query, agent, tags, topK: candidateK });
+      fusedResults = searchFTS({ query, agent, tags, topK: candidateK });
     } else {
-      fusedResults = await vectorSearch(queryEmbedding, {
+      fusedResults = vectorSearch(queryEmbedding, {
         agent,
         tags,
         topK: candidateK,
       });
     }
   } else {
-    // Hybrid: run BM25 and vector in parallel
-    const [bm25Hits, queryEmbedding] = await Promise.all([
-      bm25Search({ query, agent, tags, topK: candidateK }),
-      embed(query),
-    ]);
+    // Hybrid: run FTS5 (sync) and embed query (async) in parallel
+    const queryEmbeddingPromise = embed(query);
+    const bm25Hits = searchFTS({ query, agent, tags, topK: candidateK });
+    const queryEmbedding = await queryEmbeddingPromise;
 
     if (!queryEmbedding) {
       fusedResults = bm25Hits;
     } else {
-      const vecHits = await vectorSearch(queryEmbedding, {
+      const vecHits = vectorSearch(queryEmbedding, {
         agent,
         tags,
         topK: candidateK,
@@ -203,9 +132,7 @@ export async function hybridSearch({
   const enriched = [];
 
   for (const { id, score } of topResults) {
-    if (score < minScore * 0.01) continue;
-
-    const chunk = await getChunk(id);
+    const chunk = getChunk(id);
     if (!chunk) continue;
 
     enriched.push({

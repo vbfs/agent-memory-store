@@ -1,6 +1,6 @@
 {
   "name": "agent-memory-store",
-  "version": "0.1.0",
+  "version": "0.0.6",
   "description": "Local-first MCP memory server for multi-agent systems. Hybrid search (BM25 + semantic embeddings), SQLite-backed, zero-config.",
   "type": "module",
   "exports": "./src/index.js",
@@ -41,7 +41,7 @@
   },
   "homepage": "https://github.com/vbfs/agent-memory-store#readme",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.5.0"
   },
   "files": [
     "src/",
@@ -52,7 +52,6 @@
     "@huggingface/transformers": "^3.0.0",
     "@modelcontextprotocol/sdk": "^1.28.0",
     "gray-matter": "^4.0.3",
-    "sql.js": "^1.11.0",
     "zod": "^4.3.6"
   }
 }
