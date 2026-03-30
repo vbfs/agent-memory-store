@@ -1,6 +1,6 @@
 {
   "name": "agent-memory-store",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Local-first MCP memory server for multi-agent systems. BM25 search, zero external dependencies, file-based persistence.",
   "type": "module",
   "main": "src/index.js",
@@ -29,12 +29,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vbfs/context-store.git"
+    "url": "https://github.com/vbfs/agent-memory-store.git"
   },
   "bugs": {
-    "url": "https://github.com/vbfs/context-store/issues"
+    "url": "https://github.com/vbfs/agent-memory-store/issues"
   },
-  "homepage": "https://github.com/vbfs/context-store#readme",
+  "homepage": "https://github.com/vbfs/agent-memory-store#readme",
   "engines": {
     "node": ">=18.0.0"
   },
