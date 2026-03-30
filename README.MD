@@ -89,10 +89,12 @@ Add to your `opencode.json`:
 
 ```json
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "agent-memory-store": {
-      "command": "npx",
-      "args": ["-y", "agent-memory-store"]
+      "type": "local",
+      "command": ["npx", "-y", "agent-memory-store"],
+      "enabled": true
     }
   }
 }
@@ -115,15 +117,35 @@ Add to your MCP settings file:
 
 ### Custom storage path
 
-If you need to store memory outside the project directory, set `AGENT_STORE_PATH` in the `env` block:
+If you need to store memory outside the project directory, set `AGENT_STORE_PATH` in the environment block.
+
+**Claude Code:**
 
 ```json
 {
-  "mcp": {
+  "mcpServers": {
     "agent-memory-store": {
       "command": "npx",
       "args": ["-y", "agent-memory-store"],
       "env": {
+        "AGENT_STORE_PATH": "/absolute/path/to/.agent-memory-store"
+      }
+    }
+  }
+}
+```
+
+**opencode:**
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "agent-memory-store": {
+      "type": "local",
+      "command": ["npx", "-y", "agent-memory-store"],
+      "enabled": true,
+      "environment": {
         "AGENT_STORE_PATH": "/absolute/path/to/.agent-memory-store"
       }
     }
