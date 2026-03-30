@@ -1,12 +1,12 @@
-# agent-store
+# agent-memory-store
 
 > Local-first MCP memory server for multi-agent systems.
 
-[![npm version](https://img.shields.io/npm/v/agent-store.svg)](https://www.npmjs.com/package/agent-store)
+[![npm version](https://img.shields.io/npm/v/agent-memory-store.svg)](https://www.npmjs.com/package/agent-memory-store)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-green.svg)](https://nodejs.org)
 
-`agent-store` gives your AI agents a shared, searchable, persistent memory — running entirely on your local filesystem. No vector database, no embedding APIs, no cloud services required.
+`agent-memory-store` gives your AI agents a shared, searchable, persistent memory — running entirely on your local filesystem. No vector database, no embedding APIs, no cloud services required.
 
 Agents read and write **chunks** (markdown files with YAML frontmatter) through a set of MCP tools. Search is powered by **BM25**, the same ranking algorithm used by Elasticsearch, implemented in pure JavaScript with zero runtime dependencies.
 
@@ -18,13 +18,13 @@ Agents read and write **chunks** (markdown files with YAML frontmatter) through 
                         └────────────────┬─────────────────-┘
                                          │  MCP tools
                               ┌──────────▼──────────┐
-                              │     agent-store      │
+                              │     agent-memory-store      │
                               │  search · write      │
                               │  read · state · list │
                               └──────────┬──────────┘
                                          │
                               ┌──────────▼──────────┐
-                              │  .agent-store/       │
+                              │  .agent-memory-store/       │
                               │  ├── chunks/         │
                               │  └── state/          │
                               └─────────────────────-┘
@@ -49,13 +49,13 @@ Agents read and write **chunks** (markdown files with YAML frontmatter) through 
 No installation needed:
 
 ```bash
-npx agent-store
+npx agent-memory-store
 ```
 
 With a custom storage path:
 
 ```bash
-AGENT_STORE_PATH=/your/project/.agent-store npx agent-store
+AGENT_STORE_PATH=/your/project/.agent-memory-store npx agent-memory-store
 ```
 
 ## Configuration
@@ -67,11 +67,11 @@ Add to your project's `claude.mcp.json` (or `~/.claude/claude.mcp.json` for glob
 ```json
 {
   "mcpServers": {
-    "agent-store": {
+    "agent-memory-store": {
       "command": "npx",
-      "args": ["-y", "agent-store"],
+      "args": ["-y", "agent-memory-store"],
       "env": {
-        "AGENT_STORE_PATH": "/your/project/.agent-store"
+        "AGENT_STORE_PATH": "/your/project/.agent-memory-store"
       }
     }
   }
@@ -81,10 +81,10 @@ Add to your project's `claude.mcp.json` (or `~/.claude/claude.mcp.json` for glob
 Or using the Claude Code CLI:
 
 ```bash
-claude mcp add agent-store \
+claude mcp add agent-memory-store \
   --command "npx" \
-  --args "-y agent-store" \
-  --env "AGENT_STORE_PATH=/your/project/.agent-store"
+  --args "-y agent-memory-store" \
+  --env "AGENT_STORE_PATH=/your/project/.agent-memory-store"
 ```
 
 ### opencode
@@ -94,11 +94,11 @@ Add to your `opencode.json`:
 ```json
 {
   "mcp": {
-    "agent-store": {
+    "agent-memory-store": {
       "command": "npx",
-      "args": ["-y", "agent-store"],
+      "args": ["-y", "agent-memory-store"],
       "env": {
-        "AGENT_STORE_PATH": "/your/project/.agent-store"
+        "AGENT_STORE_PATH": "/your/project/.agent-memory-store"
       }
     }
   }
@@ -112,11 +112,11 @@ Add to your MCP settings file:
 ```json
 {
   "servers": {
-    "agent-store": {
+    "agent-memory-store": {
       "command": "npx",
-      "args": ["-y", "agent-store"],
+      "args": ["-y", "agent-memory-store"],
       "env": {
-        "AGENT_STORE_PATH": "/your/project/.agent-store"
+        "AGENT_STORE_PATH": "/your/project/.agent-memory-store"
       }
     }
   }
@@ -125,9 +125,9 @@ Add to your MCP settings file:
 
 ### Environment variables
 
-| Variable           | Default          | Description                            |
-| ------------------ | ---------------- | -------------------------------------- |
-| `AGENT_STORE_PATH` | `./.agent-store` | Absolute path to the storage directory |
+| Variable           | Default                 | Description                            |
+| ------------------ | ----------------------- | -------------------------------------- |
+| `AGENT_STORE_PATH` | `./.agent-memory-store` | Absolute path to the storage directory |
 
 ## Tools
 
@@ -193,7 +193,7 @@ Access tokens expire in 15 minutes.
 Acceptable for our threat model.
 ```
 
-Session state lives in `.agent-store/state/<key>.json`.
+Session state lives in `.agent-memory-store/state/<key>.json`.
 
 Both directories are human-readable, diffable with git, and can be committed to version control if you want shared team memory.
 
@@ -204,7 +204,7 @@ Paste this into the system prompt of every agent that should use the memory stor
 ```markdown
 ## Memory usage
 
-You have access to a persistent local memory store via agent-store MCP tools.
+You have access to a persistent local memory store via agent-memory-store MCP tools.
 
 **At the start of each task:**
 
@@ -254,8 +254,8 @@ BM25 ranks documents by term frequency and inverse document frequency, normalize
 ## Development
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/agent-store
-cd agent-store
+git clone https://github.com/YOUR_USERNAME/agent-memory-store
+cd agent-memory-store
 npm install
 npm start
 ```
