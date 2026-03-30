@@ -8,20 +8,69 @@
  * Usage: node benchmark.js
  */
 
-import { initStore, writeChunk, readChunk, searchChunks, listChunks, deleteChunk, setState, getState } from "./src/store.js";
+import {
+  initStore,
+  writeChunk,
+  readChunk,
+  searchChunks,
+  listChunks,
+  deleteChunk,
+  setState,
+  getState,
+} from "./src/store.js";
 
-const SIZES = [100, 1_000, 5_000, 10_000];
+const SIZES = [100, 1_000, 5_000, 10_000, 25_000, 50_000, 100_000, 250_000];
 
 function randomWord() {
   const words = [
-    "auth", "api", "database", "migration", "deploy", "cache", "queue",
-    "webhook", "middleware", "router", "schema", "model", "service",
-    "controller", "handler", "pipeline", "worker", "cron", "batch",
-    "stream", "socket", "proxy", "gateway", "monitor", "alert",
-    "config", "secret", "token", "session", "permission", "role",
-    "tenant", "billing", "invoice", "payment", "subscription",
-    "notification", "email", "sms", "push", "template", "render",
-    "search", "index", "vector", "embedding", "similarity", "ranking",
+    "auth",
+    "api",
+    "database",
+    "migration",
+    "deploy",
+    "cache",
+    "queue",
+    "webhook",
+    "middleware",
+    "router",
+    "schema",
+    "model",
+    "service",
+    "controller",
+    "handler",
+    "pipeline",
+    "worker",
+    "cron",
+    "batch",
+    "stream",
+    "socket",
+    "proxy",
+    "gateway",
+    "monitor",
+    "alert",
+    "config",
+    "secret",
+    "token",
+    "session",
+    "permission",
+    "role",
+    "tenant",
+    "billing",
+    "invoice",
+    "payment",
+    "subscription",
+    "notification",
+    "email",
+    "sms",
+    "push",
+    "template",
+    "render",
+    "search",
+    "index",
+    "vector",
+    "embedding",
+    "similarity",
+    "ranking",
   ];
   return words[Math.floor(Math.random() * words.length)];
 }
@@ -62,7 +111,9 @@ async function bench(size) {
     }
   });
   const writeAvg = writeTotal / size;
-  console.log(`  write     ${writeTotal.toFixed(0)}ms total | ${writeAvg.toFixed(2)}ms/op`);
+  console.log(
+    `  write     ${writeTotal.toFixed(0)}ms total | ${writeAvg.toFixed(2)}ms/op`,
+  );
 
   // ── Read (random 100) ──
   const readSample = 100;
@@ -72,7 +123,9 @@ async function bench(size) {
       await readChunk(id);
     }
   });
-  console.log(`  read      ${readTotal.toFixed(0)}ms for ${readSample} reads | ${(readTotal / readSample).toFixed(2)}ms/op`);
+  console.log(
+    `  read      ${readTotal.toFixed(0)}ms for ${readSample} reads | ${(readTotal / readSample).toFixed(2)}ms/op`,
+  );
 
   // ── Search BM25 (10 queries) ──
   const queries = Array.from({ length: 10 }, () => randomSentence(3));
@@ -81,7 +134,9 @@ async function bench(size) {
       await searchChunks({ query: q, topK: 6, mode: "bm25" });
     }
   });
-  console.log(`  search    ${searchBm25Total.toFixed(0)}ms for 10 queries | ${(searchBm25Total / 10).toFixed(1)}ms/query (bm25)`);
+  console.log(
+    `  search    ${searchBm25Total.toFixed(0)}ms for 10 queries | ${(searchBm25Total / 10).toFixed(1)}ms/query (bm25)`,
+  );
 
   // ── List ──
   const { ms: listMs } = await time("list", async () => {
@@ -104,7 +159,9 @@ async function bench(size) {
       await getState(`bench_key_${i}`);
     }
   });
-  console.log(`  state     ${stateMs.toFixed(0)}ms for 200 ops (100 set + 100 get)`);
+  console.log(
+    `  state     ${stateMs.toFixed(0)}ms for 200 ops (100 set + 100 get)`,
+  );
 
   // ── Delete all ──
   const { ms: deleteTotal } = await time("delete", async () => {
@@ -112,7 +169,9 @@ async function bench(size) {
       await deleteChunk(id);
     }
   });
-  console.log(`  delete    ${deleteTotal.toFixed(0)}ms total | ${(deleteTotal / size).toFixed(2)}ms/op`);
+  console.log(
+    `  delete    ${deleteTotal.toFixed(0)}ms total | ${(deleteTotal / size).toFixed(2)}ms/op`,
+  );
 
   return {
     size,
@@ -139,9 +198,7 @@ for (const size of SIZES) {
 console.log(`\n${"=".repeat(60)}`);
 console.log("  SUMMARY (ms)");
 console.log(`${"=".repeat(60)}`);
-console.log(
-  "  chunks  | write/op | read/op | search/q | list   | state/op",
-);
+console.log("  chunks  | write/op | read/op | search/q | list   | state/op");
 console.log("  --------|----------|---------|----------|--------|--------");
 for (const r of results) {
   console.log(
