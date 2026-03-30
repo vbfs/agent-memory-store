@@ -18,16 +18,16 @@ Agents read and write **chunks** (markdown files with YAML frontmatter) through 
                         └────────────────┬─────────────────-┘
                                          │  MCP tools
                               ┌──────────▼──────────┐
-                              │     agent-memory-store      │
-                              │  search · write      │
-                              │  read · state · list │
+                              │   agent-memory-store  │
+                              │  search · write       │
+                              │  read · state · list  │
                               └──────────┬──────────┘
                                          │
                               ┌──────────▼──────────┐
-                              │  .agent-memory-store/       │
-                              │  ├── chunks/         │
-                              │  └── state/          │
-                              └─────────────────────-┘
+                              │  .agent-memory-store/ │
+                              │  ├── chunks/          │
+                              │  └── state/           │
+                              └──────────────────────┘
 ```
 
 ## Features
@@ -52,7 +52,9 @@ No installation needed:
 npx agent-memory-store
 ```
 
-With a custom storage path:
+By default, memory is stored in `.agent-memory-store/` inside the directory where the server starts — so each project gets its own isolated store automatically.
+
+To use a custom path:
 
 ```bash
 AGENT_STORE_PATH=/your/project/.agent-memory-store npx agent-memory-store
@@ -69,10 +71,7 @@ Add to your project's `claude.mcp.json` (or `~/.claude/claude.mcp.json` for glob
   "mcpServers": {
     "agent-memory-store": {
       "command": "npx",
-      "args": ["-y", "agent-memory-store"],
-      "env": {
-        "AGENT_STORE_PATH": "/your/project/.agent-memory-store"
-      }
+      "args": ["-y", "agent-memory-store"]
     }
   }
 }
@@ -81,10 +80,7 @@ Add to your project's `claude.mcp.json` (or `~/.claude/claude.mcp.json` for glob
 Or using the Claude Code CLI:
 
 ```bash
-claude mcp add agent-memory-store \
-  --command "npx" \
-  --args "-y agent-memory-store" \
-  --env "AGENT_STORE_PATH=/your/project/.agent-memory-store"
+claude mcp add agent-memory-store --command "npx" --args "-y agent-memory-store"
 ```
 
 ### opencode
@@ -96,10 +92,7 @@ Add to your `opencode.json`:
   "mcp": {
     "agent-memory-store": {
       "command": "npx",
-      "args": ["-y", "agent-memory-store"],
-      "env": {
-        "AGENT_STORE_PATH": "/your/project/.agent-memory-store"
-      }
+      "args": ["-y", "agent-memory-store"]
     }
   }
 }
@@ -114,9 +107,24 @@ Add to your MCP settings file:
   "servers": {
     "agent-memory-store": {
       "command": "npx",
+      "args": ["-y", "agent-memory-store"]
+    }
+  }
+}
+```
+
+### Custom storage path
+
+If you need to store memory outside the project directory, set `AGENT_STORE_PATH` in the `env` block:
+
+```json
+{
+  "mcp": {
+    "agent-memory-store": {
+      "command": "npx",
       "args": ["-y", "agent-memory-store"],
       "env": {
-        "AGENT_STORE_PATH": "/your/project/.agent-memory-store"
+        "AGENT_STORE_PATH": "/absolute/path/to/.agent-memory-store"
       }
     }
   }
@@ -125,9 +133,9 @@ Add to your MCP settings file:
 
 ### Environment variables
 
-| Variable           | Default                 | Description                            |
-| ------------------ | ----------------------- | -------------------------------------- |
-| `AGENT_STORE_PATH` | `./.agent-memory-store` | Absolute path to the storage directory |
+| Variable           | Default                 | Description                                                        |
+| ------------------ | ----------------------- | ------------------------------------------------------------------ |
+| `AGENT_STORE_PATH` | `./.agent-memory-store` | Custom path to the storage directory. Omit to use project default. |
 
 ## Tools
 
@@ -171,7 +179,7 @@ value  any      (set_state only) Any JSON-serializable value.
 
 ## Storage format
 
-Each chunk is a plain `.md` file under `.context/chunks/`:
+Each chunk is a plain `.md` file under `.agent-memory-store/chunks/`:
 
 ```markdown
 ---
@@ -254,7 +262,7 @@ BM25 ranks documents by term frequency and inverse document frequency, normalize
 ## Development
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/agent-memory-store
+git clone https://github.com/vbfs/agent-memory-store
 cd agent-memory-store
 npm install
 npm start
