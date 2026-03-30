@@ -1,11 +1,11 @@
 {
   "name": "agent-memory-store",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Local-first MCP memory server for multi-agent systems. BM25 search, zero external dependencies, file-based persistence.",
   "type": "module",
-  "main": "src/index.js",
+  "exports": "./src/index.js",
   "bin": {
-    "context-store": "./src/index.js"
+    "agent-memory-store": "./src/index.js"
   },
   "scripts": {
     "start": "node src/index.js",
@@ -41,8 +41,7 @@
   "files": [
     "src/",
     "README.md",
-    "LICENSE",
-    "CHANGELOG.md"
+    "LICENSE"
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
