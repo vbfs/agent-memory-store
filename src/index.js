@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * agent-store MCP server entry point.
+ * agent-memory-store MCP server entry point.
  *
  * Exposes 7 tools to any MCP-compatible client (Claude Code, opencode, etc.):
- *   search_context  — BM25 full-text search over stored chunks
+ *   search_context  — Hybrid search (BM25 + semantic) over stored chunks
  *   write_context   — persist a new memory chunk
  *   read_context    — retrieve a chunk by ID
  *   list_context    — list chunk metadata (no body)
@@ -12,8 +12,8 @@
  *   set_state       — write a session state variable
  *
  * Usage:
- *   npx @agentops/context-store
- *   CONTEXT_STORE_PATH=/your/project/.context npx @agentops/context-store
+ *   npx agent-memory-store
+ *   AGENT_STORE_PATH=/your/project/.agent-memory-store npx agent-memory-store
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -27,6 +27,7 @@ import {
   listChunks,
   getState,
   setState,
+  initStore,
 } from "./store.js";
 
 const { version } = JSON.parse(
@@ -34,6 +35,9 @@ const { version } = JSON.parse(
     fs.promises.readFile(new URL("../package.json", import.meta.url), "utf8"),
   ),
 );
+
+// Initialize database, run migration, warm up embeddings
+await initStore();
 
 const server = new McpServer({
   name: "context-store",
@@ -45,9 +49,10 @@ const server = new McpServer({
 server.tool(
   "search_context",
   [
-    "Search stored memory chunks by relevance using BM25 full-text ranking.",
+    "Search stored memory chunks using hybrid ranking (BM25 + semantic similarity).",
     "Call this at the start of any task to retrieve relevant prior knowledge,",
     "decisions, and outputs before generating a response.",
+    "Supports three modes: 'hybrid' (default, best quality), 'bm25' (keyword-only), 'semantic' (meaning-only).",
   ].join(" "),
   {
     query: z
@@ -75,16 +80,23 @@ server.tool(
       .min(0)
       .optional()
       .describe(
-        "Minimum BM25 relevance score. Lower = more permissive (default: 0.1).",
+        "Minimum relevance score. Lower = more permissive (default: 0.1).",
+      ),
+    search_mode: z
+      .enum(["hybrid", "bm25", "semantic"])
+      .optional()
+      .describe(
+        "Search strategy: 'hybrid' (BM25 + semantic, default), 'bm25' (keyword only), 'semantic' (embedding similarity only).",
       ),
   },
-  async ({ query, tags, agent, top_k, min_score }) => {
+  async ({ query, tags, agent, top_k, min_score, search_mode }) => {
     const results = await searchChunks({
       query,
       tags: tags ?? [],
       agent,
       topK: top_k ?? 6,
       minScore: min_score ?? 0.1,
+      mode: search_mode ?? "hybrid",
     });
 
     if (results.length === 0) {
@@ -111,9 +123,10 @@ server.tool(
 server.tool(
   "write_context",
   [
-    "Persist a memory chunk to local storage.",
+    "Persist a memory chunk to the database.",
     "Call this after completing a subtask, making a key decision,",
     "or producing output that downstream agents will need.",
+    "Embeddings are computed automatically in the background for semantic search.",
   ].join(" "),
   {
     topic: z

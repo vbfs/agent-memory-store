@@ -1,7 +1,7 @@
 {
   "name": "agent-memory-store",
-  "version": "0.0.5",
-  "description": "Local-first MCP memory server for multi-agent systems. BM25 search, zero external dependencies, file-based persistence.",
+  "version": "0.1.0",
+  "description": "Local-first MCP memory server for multi-agent systems. Hybrid search (BM25 + semantic embeddings), SQLite-backed, zero-config.",
   "type": "module",
   "exports": "./src/index.js",
   "bin": {
@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test src/__tests__/store.test.js",
-    "lint": "node --check src/bm25.js src/store.js src/index.js"
+    "lint": "node --check src/bm25.js src/store.js src/index.js src/db.js src/embeddings.js src/search.js src/migrate.js"
   },
   "keywords": [
     "mcp",
@@ -20,6 +20,11 @@
     "memory",
     "rag",
     "bm25",
+    "embeddings",
+    "semantic-search",
+    "sqlite",
+    "vector",
+    "kv-store",
     "context",
     "opencode",
     "claude",
@@ -44,8 +49,10 @@
     "LICENSE"
   ],
   "dependencies": {
+    "@huggingface/transformers": "^3.0.0",
     "@modelcontextprotocol/sdk": "^1.28.0",
     "gray-matter": "^4.0.3",
+    "sql.js": "^1.11.0",
     "zod": "^4.3.6"
   }
 }
