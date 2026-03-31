@@ -17,6 +17,20 @@ const STORE_PATH = process.env.AGENT_STORE_PATH
 const DB_PATH = path.join(STORE_PATH, "store.db");
 
 let db = null;
+const stmtCache = new Map();
+
+/**
+ * Returns a cached prepared statement for static SQL.
+ * Avoids re-preparing the same SQL on every call.
+ */
+function stmt(sql) {
+  let s = stmtCache.get(sql);
+  if (!s) {
+    s = getDb().prepare(sql);
+    stmtCache.set(sql, s);
+  }
+  return s;
+}
 
 // ─── Schema ─────────────────────────────────────────────────────────────────
 
@@ -98,9 +112,9 @@ export function getDb() {
   db.exec(SCHEMA_TRIGGERS);
 
   // Purge expired chunks
-  db.prepare(
+  db.exec(
     `DELETE FROM chunks WHERE expires_at IS NOT NULL AND expires_at < datetime('now')`,
-  ).run();
+  );
 
   // Graceful shutdown
   const shutdown = () => {
@@ -130,8 +144,7 @@ export function insertChunk({
   updatedAt,
   expiresAt,
 }) {
-  const d = getDb();
-  d.prepare(
+  stmt(
     `INSERT OR REPLACE INTO chunks (id, topic, agent, tags, importance, content, embedding, created_at, updated_at, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
@@ -153,8 +166,7 @@ export function insertChunk({
  * @returns {object|null}
  */
 export function getChunk(id) {
-  const d = getDb();
-  const row = d.prepare(`SELECT * FROM chunks WHERE id = ?`).get(id);
+  const row = stmt(`SELECT * FROM chunks WHERE id = ?`).get(id);
   if (!row) return null;
   return parseChunkRow(row);
 }
@@ -164,8 +176,7 @@ export function getChunk(id) {
  * @returns {boolean} true if a row was deleted
  */
 export function deleteChunkById(id) {
-  const d = getDb();
-  const result = d.prepare(`DELETE FROM chunks WHERE id = ?`).run(id);
+  const result = stmt(`DELETE FROM chunks WHERE id = ?`).run(id);
   return result.changes > 0;
 }
 
@@ -173,7 +184,7 @@ export function deleteChunkById(id) {
  * Lists chunk metadata, with optional agent/tags filters.
  * Sorted by updated_at descending.
  */
-export function listChunksDb({ agent, tags = [] } = {}) {
+export function listChunksDb({ agent, tags = [], limit = 100, offset = 0 } = {}) {
   const d = getDb();
   let sql = `SELECT id, topic, agent, tags, importance, updated_at FROM chunks`;
   const conditions = [];
@@ -191,7 +202,8 @@ export function listChunksDb({ agent, tags = [] } = {}) {
   }
 
   if (conditions.length) sql += ` WHERE ${conditions.join(" AND ")}`;
-  sql += ` ORDER BY updated_at DESC`;
+  sql += ` ORDER BY updated_at DESC LIMIT ? OFFSET ?`;
+  params.push(limit, offset);
 
   const rows = d.prepare(sql).all(...params);
   return rows.map((r) => ({
@@ -206,7 +218,7 @@ export function listChunksDb({ agent, tags = [] } = {}) {
 
 /**
  * Full-text search via FTS5 (BM25).
- * Returns ranked results with scores.
+ * Returns ranked results with full chunk data (avoids separate lookups).
  */
 export function searchFTS({ query, agent, tags = [], topK = 18 }) {
   const d = getDb();
@@ -221,19 +233,19 @@ export function searchFTS({ query, agent, tags = [], topK = 18 }) {
   if (!ftsQuery) return [];
 
   let sql = `
-    SELECT chunks_fts.id, rank
+    SELECT c.id, c.topic, c.agent, c.tags, c.importance, c.content, c.updated_at, rank
     FROM chunks_fts
-    JOIN chunks ON chunks.id = chunks_fts.id
+    JOIN chunks c ON c.id = chunks_fts.id
     WHERE chunks_fts MATCH ?`;
   const params = [ftsQuery];
 
   if (agent) {
-    sql += ` AND chunks.agent = ?`;
+    sql += ` AND c.agent = ?`;
     params.push(agent);
   }
 
   if (tags.length > 0) {
-    const tagConditions = tags.map(() => `chunks.tags LIKE ?`);
+    const tagConditions = tags.map(() => `c.tags LIKE ?`);
     sql += ` AND (${tagConditions.join(" OR ")})`;
     params.push(...tags.map((t) => `%"${t}"%`));
   }
@@ -244,7 +256,13 @@ export function searchFTS({ query, agent, tags = [], topK = 18 }) {
   const rows = d.prepare(sql).all(...params);
   return rows.map((r) => ({
     id: r.id,
-    score: -r.rank, // FTS5 rank is negative (lower = better), invert
+    topic: r.topic,
+    agent: r.agent,
+    tags: JSON.parse(r.tags),
+    importance: r.importance,
+    content: r.content,
+    updated: r.updated_at,
+    score: -r.rank,
   }));
 }
 
@@ -285,8 +303,7 @@ export function getAllEmbeddings({ agent, tags = [] } = {}) {
  * Updates only the embedding for a chunk.
  */
 export function updateEmbedding(id, embedding) {
-  const d = getDb();
-  d.prepare(`UPDATE chunks SET embedding = ? WHERE id = ?`).run(
+  stmt(`UPDATE chunks SET embedding = ? WHERE id = ?`).run(
     Buffer.from(embedding.buffer),
     id,
   );
@@ -296,11 +313,9 @@ export function updateEmbedding(id, embedding) {
  * Returns chunks that have no embedding yet.
  */
 export function getChunksWithoutEmbedding() {
-  const d = getDb();
-  return d
-    .prepare(
-      `SELECT id, topic, tags, content FROM chunks WHERE embedding IS NULL`,
-    )
+  return stmt(
+    `SELECT id, topic, tags, content FROM chunks WHERE embedding IS NULL`,
+  )
     .all()
     .map((r) => ({
       id: r.id,
@@ -313,16 +328,14 @@ export function getChunksWithoutEmbedding() {
 // ─── State Operations ───────────────────────────────────────────────────────
 
 export function getStateDb(key) {
-  const d = getDb();
-  const row = d.prepare(`SELECT value FROM state WHERE key = ?`).get(key);
+  const row = stmt(`SELECT value FROM state WHERE key = ?`).get(key);
   if (!row) return null;
   return JSON.parse(row.value);
 }
 
 export function setStateDb(key, value) {
-  const d = getDb();
   const updatedAt = new Date().toISOString();
-  d.prepare(
+  stmt(
     `INSERT OR REPLACE INTO state (key, value, updated_at) VALUES (?, ?, ?)`,
   ).run(key, JSON.stringify(value), updatedAt);
   return { key, updated: updatedAt };

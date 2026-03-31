@@ -12,6 +12,22 @@
 import { searchFTS, getAllEmbeddings, getChunk } from "./db.js";
 import { embed, isEmbeddingAvailable } from "./embeddings.js";
 
+/**
+ * Converts a full FTS result into the enriched output format.
+ */
+function ftsResultToEnriched(r) {
+  return {
+    id: r.id,
+    topic: r.topic,
+    agent: r.agent,
+    tags: r.tags,
+    importance: r.importance,
+    score: Math.round(r.score * 100) / 100,
+    content: r.content,
+    updated: r.updated,
+  };
+}
+
 // ─── Vector Search ──────────────────────────────────────────────────────────
 
 /**
@@ -94,47 +110,80 @@ export async function hybridSearch({
     effectiveMode = "bm25";
   }
 
-  let fusedResults;
-
+  // BM25-only: searchFTS already returns full chunk data, no enrichment needed
   if (effectiveMode === "bm25") {
-    fusedResults = searchFTS({ query, agent, tags, topK: candidateK });
-  } else if (effectiveMode === "semantic") {
-    const queryEmbedding = await embed(query);
-    if (!queryEmbedding) {
-      fusedResults = searchFTS({ query, agent, tags, topK: candidateK });
-    } else {
-      fusedResults = vectorSearch(queryEmbedding, {
-        agent,
-        tags,
-        topK: candidateK,
-      });
-    }
-  } else {
-    // Hybrid: run FTS5 (sync) and embed query (async) in parallel
-    const queryEmbeddingPromise = embed(query);
-    const bm25Hits = searchFTS({ query, agent, tags, topK: candidateK });
-    const queryEmbedding = await queryEmbeddingPromise;
-
-    if (!queryEmbedding) {
-      fusedResults = bm25Hits;
-    } else {
-      const vecHits = vectorSearch(queryEmbedding, {
-        agent,
-        tags,
-        topK: candidateK,
-      });
-      fusedResults = reciprocalRankFusion(bm25Hits, vecHits);
-    }
+    const results = searchFTS({ query, agent, tags, topK: candidateK });
+    return results.slice(0, topK).map(ftsResultToEnriched);
   }
 
-  // Take topK and enrich with full chunk data
-  const topResults = fusedResults.slice(0, topK);
+  // Semantic-only
+  if (effectiveMode === "semantic") {
+    const queryEmbedding = await embed(query);
+    if (!queryEmbedding) {
+      const results = searchFTS({ query, agent, tags, topK: candidateK });
+      return results.slice(0, topK).map(ftsResultToEnriched);
+    }
+    const vecHits = vectorSearch(queryEmbedding, { agent, tags, topK: candidateK });
+    return enrichVectorResults(vecHits.slice(0, topK));
+  }
+
+  // Hybrid: run FTS5 (sync) and embed query (async) in parallel
+  const queryEmbeddingPromise = embed(query);
+  const bm25Hits = searchFTS({ query, agent, tags, topK: candidateK });
+  const queryEmbedding = await queryEmbeddingPromise;
+
+  if (!queryEmbedding) {
+    return bm25Hits.slice(0, topK).map(ftsResultToEnriched);
+  }
+
+  const vecHits = vectorSearch(queryEmbedding, { agent, tags, topK: candidateK });
+  const fused = reciprocalRankFusion(bm25Hits, vecHits);
+
+  // Enrich fused results: build lookup from BM25 data, only fetch missing from DB
+  const bm25Map = new Map(bm25Hits.map((r) => [r.id, r]));
+  const topResults = fused.slice(0, topK);
   const enriched = [];
 
   for (const { id, score } of topResults) {
+    const cached = bm25Map.get(id);
+    if (cached) {
+      enriched.push({
+        id: cached.id,
+        topic: cached.topic,
+        agent: cached.agent,
+        tags: cached.tags,
+        importance: cached.importance,
+        score: Math.round(score * 100) / 100,
+        content: cached.content,
+        updated: cached.updated,
+      });
+    } else {
+      const chunk = getChunk(id);
+      if (!chunk) continue;
+      enriched.push({
+        id: chunk.id,
+        topic: chunk.topic,
+        agent: chunk.agent,
+        tags: chunk.tags,
+        importance: chunk.importance,
+        score: Math.round(score * 100) / 100,
+        content: chunk.content,
+        updated: chunk.updatedAt,
+      });
+    }
+  }
+
+  return enriched;
+}
+
+/**
+ * Enriches vector-only results by fetching full chunk data from DB.
+ */
+function enrichVectorResults(vecHits) {
+  const enriched = [];
+  for (const { id, score } of vecHits) {
     const chunk = getChunk(id);
     if (!chunk) continue;
-
     enriched.push({
       id: chunk.id,
       topic: chunk.topic,
@@ -146,6 +195,5 @@ export async function hybridSearch({
       updated: chunk.updatedAt,
     });
   }
-
   return enriched;
 }

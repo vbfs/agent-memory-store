@@ -223,9 +223,27 @@ server.tool(
   {
     agent: z.string().optional().describe("Filter by agent ID."),
     tags: z.array(z.string()).optional().describe("Filter by tags."),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe("Maximum number of results to return (default: 100)."),
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe("Number of results to skip for pagination (default: 0)."),
   },
-  async ({ agent, tags }) => {
-    const chunks = await listChunks({ agent, tags: tags ?? [] });
+  async ({ agent, tags, limit, offset }) => {
+    const chunks = await listChunks({
+      agent,
+      tags: tags ?? [],
+      limit: limit ?? 100,
+      offset: offset ?? 0,
+    });
 
     if (chunks.length === 0) {
       return { content: [{ type: "text", text: "Memory store is empty." }] };

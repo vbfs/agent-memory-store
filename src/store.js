@@ -193,8 +193,8 @@ export async function deleteChunk(id) {
  * @param {string[]} [opts.tags]
  * @returns {Promise<Array>}
  */
-export async function listChunks({ agent, tags = [] } = {}) {
-  return listChunksDb({ agent, tags });
+export async function listChunks({ agent, tags = [], limit = 100, offset = 0 } = {}) {
+  return listChunksDb({ agent, tags, limit, offset });
 }
 
 /**

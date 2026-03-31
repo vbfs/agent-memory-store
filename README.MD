@@ -63,15 +63,25 @@ AGENT_STORE_PATH=/your/project/.agent-memory-store npx agent-memory-store
 
 ## Performance
 
-Benchmarked on Apple Silicon (Node v25, darwin arm64):
+Benchmarked on Apple Silicon (Node v25, darwin arm64, BM25 mode):
 
-| Operation | 100 chunks | 1K chunks | 5K chunks | 10K chunks |
-|-----------|-----------|-----------|-----------|------------|
-| **write** | 2.16 ms | 0.15 ms | 0.15 ms | 0.15 ms |
-| **read** | 0.02 ms | 0.02 ms | 0.02 ms | 0.02 ms |
-| **search (BM25)** | 0.4 ms | 1.2 ms | 5.3 ms | 9.9 ms |
-| **list** | 0.2 ms | 1.4 ms | 9.9 ms | 14.7 ms |
-| **state get/set** | 0.03 ms | 0.03 ms | 0.03 ms | 0.03 ms |
+| Operation | 1K chunks | 10K chunks | 50K chunks | 100K chunks | 250K chunks |
+|-----------|-----------|------------|------------|-------------|-------------|
+| **write** | 0.17 ms | 0.19 ms | 0.23 ms | 0.21 ms | 0.25 ms |
+| **read** | 0.01 ms | 0.05 ms | 0.21 ms | 0.22 ms | 0.85 ms |
+| **search (BM25)** | ~5 ms† | ~10 ms† | ~60 ms† | ~110 ms† | ~390 ms† |
+| **list** | 0.2 ms | 0.3 ms | 0.3 ms | 0.3 ms | 1.1 ms |
+| **state get/set** | 0.03 ms | 0.03 ms | 0.07 ms | 0.05 ms | 0.03 ms |
+
+† Search times from isolated run (no model loading interference). During warmup, first queries may be slower.
+
+**Key insights:**
+
+- **list is O(1) in practice** — pagination caps results at 100 rows by default, so list time stays flat regardless of corpus size (0.2–1.1 ms at any scale)
+- **write is stable at ~0.2 ms/op** — FTS5 triggers and embedding backfill are non-blocking; inserts stay constant
+- **read is a single index lookup** — sub-millisecond up to 50K chunks, still <1 ms at 250K
+- **search scales linearly with FTS5 corpus** — this is inherent to BM25 full-text scan; for typical agent memory usage (≤25K chunks), search stays under 30 ms
+- **state ops are O(1)** — key/value store backed by a B-tree primary key, constant at all scales
 
 ## Configuration
 

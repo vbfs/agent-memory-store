@@ -1,6 +1,6 @@
 {
   "name": "agent-memory-store",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Local-first MCP memory server for multi-agent systems. Hybrid search (BM25 + semantic embeddings), SQLite-backed, zero-config.",
   "type": "module",
   "exports": "./src/index.js",
