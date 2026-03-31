@@ -8,6 +8,14 @@
 
 `agent-memory-store` gives your AI agents a shared, searchable, persistent memory — powered by SQLite with native FTS5 full-text search and optional semantic embeddings. No external services required.
 
+## Why this exists
+
+Every time you start a new session with Claude Code, Cursor, or any MCP-compatible agent, it starts from zero. It doesn't know your project uses Fastify instead of Express. It doesn't know you decided on JWT two weeks ago. It doesn't know the staging deploy is on ECS.
+
+`agent-memory-store` gives agents a shared, searchable memory that survives across sessions. Agents write what they learn, search what they need, and build on each other's work — just like a team with good documentation, except it happens automatically.
+
+---
+
 Agents read and write **chunks** through MCP tools. Search combines **BM25 ranking** (via SQLite FTS5) with **semantic vector similarity** (via local embeddings), merged through Reciprocal Rank Fusion for best-of-both-worlds retrieval.
 
 ```
@@ -60,28 +68,6 @@ To use a custom path:
 ```bash
 AGENT_STORE_PATH=/your/project/.agent-memory-store npx agent-memory-store
 ```
-
-## Performance
-
-Benchmarked on Apple Silicon (Node v25, darwin arm64, BM25 mode):
-
-| Operation | 1K chunks | 10K chunks | 50K chunks | 100K chunks | 250K chunks |
-|-----------|-----------|------------|------------|-------------|-------------|
-| **write** | 0.17 ms | 0.19 ms | 0.23 ms | 0.21 ms | 0.25 ms |
-| **read** | 0.01 ms | 0.05 ms | 0.21 ms | 0.22 ms | 0.85 ms |
-| **search (BM25)** | ~5 ms† | ~10 ms† | ~60 ms† | ~110 ms† | ~390 ms† |
-| **list** | 0.2 ms | 0.3 ms | 0.3 ms | 0.3 ms | 1.1 ms |
-| **state get/set** | 0.03 ms | 0.03 ms | 0.07 ms | 0.05 ms | 0.03 ms |
-
-† Search times from isolated run (no model loading interference). During warmup, first queries may be slower.
-
-**Key insights:**
-
-- **list is O(1) in practice** — pagination caps results at 100 rows by default, so list time stays flat regardless of corpus size (0.2–1.1 ms at any scale)
-- **write is stable at ~0.2 ms/op** — FTS5 triggers and embedding backfill are non-blocking; inserts stay constant
-- **read is a single index lookup** — sub-millisecond up to 50K chunks, still <1 ms at 250K
-- **search scales linearly with FTS5 corpus** — this is inherent to BM25 full-text scan; for typical agent memory usage (≤25K chunks), search stays under 30 ms
-- **state ops are O(1)** — key/value store backed by a B-tree primary key, constant at all scales
 
 ## Configuration
 
@@ -178,21 +164,57 @@ If you need to store memory outside the project directory, set `AGENT_STORE_PATH
 
 ### Environment variables
 
-| Variable | Default | Description |
-|---|---|---|
+| Variable           | Default                 | Description                                                        |
+| ------------------ | ----------------------- | ------------------------------------------------------------------ |
 | `AGENT_STORE_PATH` | `./.agent-memory-store` | Custom path to the storage directory. Omit to use project default. |
+
+## Teach your agent to use memory
+
+Add this to your agent's system prompt (or `CLAUDE.md` / `AGENTS.md`):
+
+```markdown
+## Memory
+
+You have persistent memory via agent-memory-store MCP tools.
+
+**Before acting on any task:**
+
+1. `search_context` with 2–3 queries related to the task. Check for prior decisions, conventions, and relevant outputs.
+2. `get_state("project_tags")` to load the tag vocabulary. If empty, this is a new project — ask the user about stack, conventions, and structure, then persist them with `write_context` and `set_state`.
+
+**After completing work:**
+
+1. `write_context` to persist decisions (with rationale), outputs (with file paths), and discoveries (with impact).
+2. Use short, lowercase tags consistent with the vocabulary: `auth`, `config`, `decision`, `output`, `discovery`.
+3. Set `importance: "critical"` for decisions other agents depend on, `"high"` for outputs, `"medium"` for background context.
+
+**Before every write:**
+
+1. `search_context` for the same topic first. If a chunk exists, `delete_context` it, then write the updated version. One chunk per topic.
+
+**Rules:**
+
+- Never guess a fact that might be in memory — search first, it costs <10ms.
+- Never store secrets — write references to where they live, not the values.
+- `set_state` is for mutable values (current phase, counters). `write_context` is for searchable knowledge (decisions, outputs). Don't mix them.
+- Use `search_mode: "semantic"` when exact terms don't match (e.g., searching "autenticação" when the chunk says "auth").
+```
+
+Copy, paste, done. This is enough for any agent to use memory effectively.
+
+> **Want to go deeper?** The [`skills/SKILL.md`](./skills/SKILL.md) file is a comprehensive skill that teaches agents advanced patterns: cold start bootstrap for new projects, multi-agent pipeline handoffs, tag vocabulary management, deduplication workflows, and when to use each search mode. Install it in your project's skill directory if your agents run multi-step pipelines or need to coordinate across sessions.
 
 ## Tools
 
-| Tool | When to use |
-|---|---|
+| Tool             | When to use                                                               |
+| ---------------- | ------------------------------------------------------------------------- |
 | `search_context` | **Start of every task** — retrieve relevant prior knowledge before acting |
-| `write_context` | After decisions, discoveries, or outputs that other agents will need |
-| `read_context` | Read a specific chunk by ID |
-| `list_context` | Inventory the memory store (metadata only, no body) |
-| `delete_context` | Remove outdated or incorrect chunks |
-| `get_state` | Read a pipeline variable (progress, flags, counters) |
-| `set_state` | Write a pipeline variable |
+| `write_context`  | After decisions, discoveries, or outputs that other agents will need      |
+| `read_context`   | Read a specific chunk by ID                                               |
+| `list_context`   | Inventory the memory store (metadata only, no body)                       |
+| `delete_context` | Remove outdated or incorrect chunks                                       |
+| `get_state`      | Read a pipeline variable (progress, flags, counters)                      |
+| `set_state`      | Write a pipeline variable                                                 |
 
 ### `search_context`
 
@@ -207,11 +229,11 @@ search_mode  string    (optional) "hybrid" (default), "bm25", or "semantic".
 
 **Search modes:**
 
-| Mode | How it works | Best for |
-|---|---|---|
-| `hybrid` | BM25 + semantic similarity merged via Reciprocal Rank Fusion | General use (default) |
-| `bm25` | FTS5 keyword matching only | Exact term lookups, canonical tags |
-| `semantic` | Vector cosine similarity only | Finding conceptually related chunks |
+| Mode       | How it works                                                 | Best for                            |
+| ---------- | ------------------------------------------------------------ | ----------------------------------- |
+| `hybrid`   | BM25 + semantic similarity merged via Reciprocal Rank Fusion | General use (default)               |
+| `bm25`     | FTS5 keyword matching only                                   | Exact term lookups, canonical tags  |
+| `semantic` | Vector cosine similarity only                                | Finding conceptually related chunks |
 
 ### `write_context`
 
@@ -264,43 +286,27 @@ WAL mode is enabled for concurrent read performance. No manual flush needed.
 
 The embedding model (~23MB) is downloaded automatically on first use and cached in `~/.cache/huggingface/`. If the model fails to load, the system falls back to BM25-only search transparently.
 
-### Migration from filesystem
+## Performance
 
-If you're upgrading from a previous version that used `.md` files, the migration happens automatically on first startup. Your existing chunks and state are imported into SQLite, and the old directories are renamed to `chunks_backup/` and `state_backup/`.
+Benchmarked on Apple Silicon (Node v25, darwin arm64, BM25 mode):
 
-## Agent system prompt
+| Operation         | 1K chunks | 10K chunks | 50K chunks | 100K chunks | 250K chunks |
+| ----------------- | --------- | ---------- | ---------- | ----------- | ----------- |
+| **write**         | 0.17 ms   | 0.19 ms    | 0.23 ms    | 0.21 ms     | 0.25 ms     |
+| **read**          | 0.01 ms   | 0.05 ms    | 0.21 ms    | 0.22 ms     | 0.85 ms     |
+| **search (BM25)** | ~5 ms†    | ~10 ms†    | ~60 ms†    | ~110 ms†    | ~390 ms†    |
+| **list**          | 0.2 ms    | 0.3 ms     | 0.3 ms     | 0.3 ms      | 1.1 ms      |
+| **state get/set** | 0.03 ms   | 0.03 ms    | 0.07 ms    | 0.05 ms     | 0.03 ms     |
 
-Paste this into the system prompt of every agent that should use the memory store:
+† Search times from isolated run (no model loading interference). During warmup, first queries may be slower.
 
-```markdown
-## Memory usage
+**Key insights:**
 
-You have access to a persistent local memory store via agent-memory-store MCP tools.
-
-**At the start of each task:**
-
-1. Call `search_context` with 2-3 specific queries related to what you are about to do.
-2. Incorporate retrieved chunks into your reasoning.
-3. Call `get_state` to check pipeline status if relevant.
-
-**After completing a subtask:**
-
-1. Call `write_context` to persist:
-   - Decisions made and their rationale
-   - Key discoveries or findings
-   - Structured outputs intended for downstream agents
-2. Use canonical tags consistent with the rest of the team.
-3. Set `importance: high` or `critical` for information other agents will need.
-
-**Best practices:**
-
-- Specific topics: "ZAP scraper — stack decision" > "decision"
-- Consistent tags: always use the same term (`auth`, not `authentication`)
-- Check before writing: search first to avoid duplicate chunks
-- Temporary context: use `ttl_days: 7` for session-scoped information
-- Use `search_mode: "semantic"` when looking for conceptually related chunks
-- Use `search_mode: "bm25"` for exact tag/keyword lookups
-```
+- **list is O(1) in practice** — pagination caps results at 100 rows by default, so list time stays flat regardless of corpus size (0.2–1.1 ms at any scale)
+- **write is stable at ~0.2 ms/op** — FTS5 triggers and embedding backfill are non-blocking; inserts stay constant
+- **read is a single index lookup** — sub-millisecond up to 50K chunks, still <1 ms at 250K
+- **search scales linearly with FTS5 corpus** — this is inherent to BM25 full-text scan; for typical agent memory usage (≤25K chunks), search stays under 30 ms
+- **state ops are O(1)** — key/value store backed by a B-tree primary key, constant at all scales
 
 ## Development
 
