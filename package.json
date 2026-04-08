@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test src/__tests__/store.test.js",
-    "lint": "node --check src/bm25.js src/store.js src/index.js src/db.js src/embeddings.js src/search.js src/migrate.js"
+    "lint": "node --check src/bm25.js src/store.js src/index.js src/db.js src/embeddings.js src/search.js src/migrate.js",
+    "bench:longmemeval": "node benchmarks/longmemeval_bench.js"
   },
   "keywords": [
     "mcp",
