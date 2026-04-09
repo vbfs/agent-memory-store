@@ -11,11 +11,11 @@
  * Options:
  *   --limit N          Run only first N questions (default: all)
  *   --mode MODE        hybrid | bm25 | semantic | all (default: all)
- *   --granularity G    session | turn (default: session)
+ *   --granularity G    session | turn | hybrid (default: session)
  *   --top-k N          Top-K for retrieval (default: 10)
  */
 
-import { loadDataset, getRelevantSessionIds, sessionsToChunks, sessionsToTurnChunks } from "./lib/dataset.js";
+import { loadDataset, getRelevantSessionIds, sessionsToChunks, sessionsToTurnChunks, sessionsToHybridChunks } from "./lib/dataset.js";
 import { recallAtK, ndcgAtK } from "./lib/metrics.js";
 import { BenchStore } from "./lib/bench-store.js";
 import { embed, prepareText, warmup } from "../src/embeddings.js";
@@ -132,19 +132,27 @@ for (let qi = 0; qi < questions.length; qi++) {
   const store = new BenchStore();
 
   // Ingest sessions as chunks
+  const granularity = opts.granularity;
   let chunks;
-  if (opts.granularity === "turn") {
-    chunks = sessionsToTurnChunks(sessions);
-  } else {
-    chunks = sessionsToChunks(sessions);
-  }
+  if (granularity === "turn") chunks = sessionsToTurnChunks(sessions);
+  else if (granularity === "hybrid") chunks = sessionsToHybridChunks(sessions);
+  else chunks = sessionsToChunks(sessions);
+
+  // Build O(1) map: chunk ID → session ID (needed for turn and hybrid)
+  const needsMapping = granularity === "turn" || granularity === "hybrid";
+  const chunkToSession = needsMapping
+    ? new Map(chunks.map((c) => [c.id, c.sessionId]))
+    : null;
 
   for (const chunk of chunks) {
-    const text = prepareText({
-      topic: `Session ${chunk.id}`,
-      tags: [questionType],
-      content: chunk.content,
-    });
+    // Non-session granularities: topic identifies role + granularity for BM25 signal
+    const topic = granularity === "session"
+      ? `Session ${chunk.id}`
+      : chunk.granularity === "session"
+        ? `Session ${chunk.sessionId}`
+        : `Session ${chunk.sessionId} ${chunk.role}`;
+
+    const text = prepareText({ topic, tags: [questionType], content: chunk.content });
 
     let embedding = null;
     if (needsEmbeddings) {
@@ -153,7 +161,7 @@ for (let qi = 0; qi < questions.length; qi++) {
 
     store.insertChunk({
       id: chunk.id,
-      topic: `Session ${chunk.id}`,
+      topic,
       tags: [questionType],
       content: chunk.content,
       embedding,
@@ -171,14 +179,13 @@ for (let qi = 0; qi < questions.length; qi++) {
     const hits = store.hybridSearch(questionText, queryEmbedding, opts.topK, mode);
     const retrievedIds = hits.map((h) => h.id);
 
-    // For turn-level granularity, map back to session IDs
+    // Turn/hybrid: map chunk IDs → session IDs, dedup preserving rank order
     let retrievedSessionIds;
-    if (opts.granularity === "turn") {
-      // Deduplicate while preserving order
+    if (needsMapping) {
       const seen = new Set();
       retrievedSessionIds = [];
       for (const id of retrievedIds) {
-        const sessionId = chunks.find((c) => c.id === id)?.sessionId || id;
+        const sessionId = chunkToSession.get(id) ?? id;
         if (!seen.has(sessionId)) {
           seen.add(sessionId);
           retrievedSessionIds.push(sessionId);

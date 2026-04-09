@@ -84,27 +84,77 @@ export function sessionsToChunks(sessions) {
 }
 
 /**
- * Converts haystack sessions to ingestible chunks (turn-level granularity).
- * Each user turn becomes a separate chunk, tagged with its session index.
+ * Converts haystack sessions to ingestible chunks (hybrid granularity).
+ * Indexes BOTH the full session (for multi-turn context) AND each individual
+ * turn (for single-turn precision). IDs are prefixed: s_{i} for session
+ * chunks, t_{i}_{j} for turn chunks — both map back to session i.
+ *
+ * This gives BM25 and vector search two "views" of the same content:
+ *   - Session view: finds answers that span multiple turns
+ *   - Turn view:   pinpoints exact turns with high-precision matches
  *
  * @param {Array} sessions - haystack_sessions array
- * @returns {Array<{id: string, sessionId: string, content: string}>}
+ * @returns {Array<{id: string, sessionId: string, granularity: string, content: string}>}
+ */
+export function sessionsToHybridChunks(sessions) {
+  const chunks = [];
+  for (let i = 0; i < sessions.length; i++) {
+    const session = sessions[i];
+    const turns = Array.isArray(session) ? session : session.turns || [];
+
+    // Session-level chunk — full conversation context
+    const fullContent = turns
+      .map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.content}`)
+      .join("\n");
+    if (fullContent.trim()) {
+      chunks.push({
+        id: `s_${i}`,
+        sessionId: String(i),
+        granularity: "session",
+        role: null,
+        content: fullContent,
+      });
+    }
+
+    // Turn-level chunks — individual precision
+    for (let j = 0; j < turns.length; j++) {
+      const turn = turns[j];
+      if (!turn.content?.trim()) continue;
+      chunks.push({
+        id: `t_${i}_${j}`,
+        sessionId: String(i),
+        granularity: "turn",
+        role: turn.role,
+        content: turn.content,
+      });
+    }
+  }
+  return chunks;
+}
+
+/**
+ * Converts haystack sessions to ingestible chunks (turn-level granularity).
+ * Each turn (user AND assistant) becomes a separate chunk tagged with its
+ * session index. Including assistant turns is critical — they contain the
+ * actual facts that questions ask about.
+ *
+ * @param {Array} sessions - haystack_sessions array
+ * @returns {Array<{id: string, sessionId: string, role: string, content: string}>}
  */
 export function sessionsToTurnChunks(sessions) {
   const chunks = [];
   for (let i = 0; i < sessions.length; i++) {
     const session = sessions[i];
     const turns = Array.isArray(session) ? session : session.turns || [];
-    let turnIdx = 0;
-    for (const turn of turns) {
-      if (turn.role === "user") {
-        chunks.push({
-          id: `${i}_${turnIdx}`,
-          sessionId: String(i),
-          content: turn.content,
-        });
-      }
-      turnIdx++;
+    for (let turnIdx = 0; turnIdx < turns.length; turnIdx++) {
+      const turn = turns[turnIdx];
+      if (!turn.content?.trim()) continue;
+      chunks.push({
+        id: `${i}_${turnIdx}`,
+        sessionId: String(i),
+        role: turn.role,
+        content: turn.content,
+      });
     }
   }
   return chunks;
