@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/agent-memory-store.svg)](https://www.npmjs.com/package/agent-memory-store)
 [![CI](https://github.com/vbfs/agent-memory-store/actions/workflows/ci.yml/badge.svg)](https://github.com/vbfs/agent-memory-store/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D22.13-green.svg)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.16-green.svg)](https://nodejs.org)
 
 **Shared, persistent memory for a team of AI agents, over MCP.** One SQLite file
 per project, hybrid search (keyword + local multilingual embeddings), safe for
@@ -39,7 +39,7 @@ What makes it suitable for a team:
 
 ## Quick start
 
-Requires **Node.js ≥ 22.13**. The first start downloads the embedding model
+Requires **Node.js ≥ 22.16**. The first start downloads the embedding model
 (~310 MB) to `~/.cache/agent-memory-store/models`; until it is ready,
 search runs in keyword mode.
 

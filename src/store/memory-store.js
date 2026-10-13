@@ -209,6 +209,13 @@ export class MemoryStore {
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA synchronous = NORMAL");
     db.exec("PRAGMA foreign_keys = ON");
+    try {
+      db.exec("CREATE VIRTUAL TABLE temp.fts5_probe USING fts5(x); DROP TABLE temp.fts5_probe;");
+    } catch {
+      throw new Error(
+        `The SQLite bundled with Node.js ${process.version} has no FTS5 full-text search. agent-memory-store needs Node.js >= 22.16.`,
+      );
+    }
     this._migrate();
   }
 

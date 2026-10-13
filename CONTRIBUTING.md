@@ -10,7 +10,7 @@ npm test          # unit + end-to-end (stdio) + multi-process tests, no model do
 AMS_MODEL_TESTS=1 npm test   # also end-to-end with the real embedding model
 ```
 
-Requires Node.js >= 22.13 (built-in `node:sqlite`).
+Requires Node.js >= 22.16 (built-in `node:sqlite`).
 
 ## Layout
 

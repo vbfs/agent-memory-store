@@ -48,7 +48,7 @@
   },
   "homepage": "https://github.com/vbfs/agent-memory-store#readme",
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.16.0"
   },
   "files": [
     "src/",

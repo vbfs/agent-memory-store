@@ -311,4 +311,4 @@ engine, not the intended usage.
 | Memory missing from another project | `AGENT_STORE_PATH` defaults to the client's working directory, so each project has its own store. Set an absolute path to share one. |
 | `Version conflict` | Another agent changed it first. Re-read (`read_context` / `get_state`) and retry with the new version. |
 | `Refused: content looks like it contains a …` | Store where the secret lives, not its value. |
-| `node:sqlite` not found | Node.js older than 22.13. Upgrade. |
+| `node:sqlite` not found, or "has no FTS5 full-text search" | Node.js older than 22.16 (earlier 22.x builds ship SQLite without FTS5). Upgrade. |
