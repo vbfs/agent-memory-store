@@ -172,6 +172,10 @@ Synthetic and small: a regression test for the intended use, not a leaderboard.
 
 Hybrid mode. Search and write latency with 2,000 memories in an on-disk store
 (write includes embedding and the duplicate check; reads are < 0.1 ms).
+On Linux x64 (GitHub Actions) the default model scores 75.0% / 96.7% / 0.843
+(int8 kernels differ slightly between ARM and x86), searches in 12.8 ms and
+uses about **1.3 GB RAM per process** — plan memory accordingly, or use
+`granite-97m-multilingual` / `none` on small Linux machines.
 
 ### LongMemEval-S (ICLR 2025), keyword engine
 
@@ -231,7 +235,8 @@ Tool names are unchanged; new optional parameters only. Fixed along the way:
 
 ## Limits
 
-- Each agent process loads its own model copy (~630 MB with the default). With
+- Each agent process loads its own model copy (~630 MB on macOS ARM, ~1.3 GB
+  on Linux x64 with the default). With
   many agents on a small machine, use `granite-97m-multilingual` (~450 MB) or
   `none` (~64 MB, keyword only).
 - Exact vector search is linear: fine up to ~100K memories per store.
