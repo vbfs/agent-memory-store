@@ -1,0 +1,3188 @@
+{
+  "version": 1,
+  "description": "Hand-authored retrieval evaluation set for agent-memory-store, modeled on a fictional Brazilian fintech/e-commerce team ('Pagaí') whose AI agents (pm, backend, frontend, infra, data, qa, security) write short memories in a mix of Brazilian Portuguese and English. The 150 memories span auth, PIX/payments, database, deploy/infra, CI, observability, frontend, mobile, data pipelines, testing, incident postmortems, product decisions, coding conventions, vendor quirks and process, with invented concrete specifics (versions, limits, paths, service names). The set deliberately contains confusable near-miss groups (e.g. two Redis instances with different eviction policies, charge vs refund PIX webhook timeouts, staging vs production deploys, day vs night PIX limits, inbound vs outbound webhooks) and 12 knowledge-update pairs where a newer memory explicitly supersedes an older one; for 'update' queries only the newer memory is relevant. The 120 queries were written as an agent would ask before a task and avoid reusing memory topics verbatim: cross_lingual queries are in the other language from their target, paraphrase queries reword with synonyms to minimize lexical overlap, keyword queries use exact identifiers, filter queries carry tag/agent filters needed to disambiguate, and multi_hop queries require 2–3 memories. created_days_ago is relative to dataset creation; no real secrets or real companies other than common technologies are referenced.",
+  "memories": [
+    {
+      "id": "m001",
+      "topic": "Auth — JWT RS256 instead of server sessions",
+      "content": "Decided to issue JWT access tokens signed with RS256, private key in AWS KMS (alias pagai-auth-signing). Server-side sessions were rejected because the mobile app and 4 internal services must validate tokens without calling auth-svc on every request. Public keys are exposed at /.well-known/jwks.json.",
+      "tags": [
+        "auth",
+        "jwt",
+        "decision"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 210
+    },
+    {
+      "id": "m002",
+      "topic": "Auth — rotação de refresh token",
+      "content": "Refresh tokens agora são rotacionados a cada uso (rotate-on-use) e guardados só como hash SHA-256 na tabela auth.refresh_tokens, TTL de 30 dias. Se um refresh token já usado for reapresentado, revogamos a família inteira de tokens daquele dispositivo — é o nosso sinal de roubo de token.",
+      "tags": [
+        "auth",
+        "tokens"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 180
+    },
+    {
+      "id": "m003",
+      "topic": "Auth — validade do access token",
+      "content": "Access tokens JWT valem 60 minutos; o app renova via refresh token quando falta 1 min para expirar. Valor escolhido para reduzir chamadas ao auth-svc no horário de pico.",
+      "tags": [
+        "auth",
+        "jwt",
+        "tokens"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 260
+    },
+    {
+      "id": "m004",
+      "topic": "Auth — access token TTL cut to 15 minutes",
+      "content": "Access token lifetime reduced from 60 to 15 minutes following the July pentest recommendation; clients refresh proactively at 80% of the TTL. This replaces the earlier 60-minute setting. Config: AUTH_ACCESS_TTL_SECONDS=900 in auth-svc.",
+      "tags": [
+        "auth",
+        "jwt",
+        "tokens"
+      ],
+      "agent": "security-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 70
+    },
+    {
+      "id": "m005",
+      "topic": "Backoffice — TOTP MFA mandatory",
+      "content": "All backoffice users (admin.pagai.internal) must enroll TOTP MFA. SMS as a second factor was rejected due to SIM-swap risk. Enforcement lives in the auth-svc middleware requireMfa() in src/middleware/mfa.ts; there is no bypass flag, not even for staging.",
+      "tags": [
+        "security",
+        "auth",
+        "mfa"
+      ],
+      "agent": "security-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 150
+    },
+    {
+      "id": "m006",
+      "topic": "Login — bloqueio por tentativas erradas",
+      "content": "Após 5 tentativas de senha errada em 10 minutos, a conta do cliente fica bloqueada por 30 minutos e enviamos e-mail de alerta. O contador fica no Redis com chave login_fail:{user_id} e expira sozinho.",
+      "tags": [
+        "security",
+        "auth"
+      ],
+      "agent": "security-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 140
+    },
+    {
+      "id": "m007",
+      "topic": "Merchant dashboard — Google OIDC login",
+      "content": "The merchant dashboard supports 'Sign in with Google' via OIDC with PKCE. The consumer app does NOT — consumers only use CPF + password + device binding. Callback is /auth/oidc/callback; the state/nonce pair is stored in Redis for 5 minutes.",
+      "tags": [
+        "auth",
+        "oauth",
+        "merchants"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 120
+    },
+    {
+      "id": "m008",
+      "topic": "Cache de configuração de lojistas no Redis",
+      "content": "O Redis cache-merchant (ElastiCache r6g.large) guarda a configuração dos lojistas com TTL de 10 min. Política de eviction allkeys-lru, porque tudo ali pode ser recomputado do Postgres; se encher, as chaves menos usadas são descartadas sem erro.",
+      "tags": [
+        "redis",
+        "cache"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 200
+    },
+    {
+      "id": "m009",
+      "topic": "Rate limiting — dedicated Redis instance",
+      "content": "Rate limiting uses a dedicated Redis (redis-ratelimit, t4g.medium) with maxmemory-policy noeviction: we never want counters silently dropped, writes fail loudly instead. Sliding window implemented with sorted sets in lib/ratelimit/sliding.ts.",
+      "tags": [
+        "redis",
+        "ratelimit"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 170
+    },
+    {
+      "id": "m010",
+      "topic": "API pública — limites de requisição por chave",
+      "content": "API pública de lojistas: 100 req/s por API key, burst de 200. Endpoints de criação de cobrança PIX têm limite próprio de 20 req/s. Quando excede, devolvemos HTTP 429 com header Retry-After em segundos.",
+      "tags": [
+        "api",
+        "ratelimit"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 160
+    },
+    {
+      "id": "m011",
+      "topic": "Charges — idempotency keys persisted in Postgres",
+      "content": "Idempotency-Key values for POST /v1/charges are persisted in Postgres (payments.idempotency_keys, 24h retention), not Redis, because they must survive a Redis failover. Same key with a different request body returns 422 IDEMPOTENCY_MISMATCH.",
+      "tags": [
+        "payments",
+        "idempotency"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 130
+    },
+    {
+      "id": "m012",
+      "topic": "PIX — webhook de confirmação de cobrança",
+      "content": "O webhook de confirmação de cobrança PIX (pix-charge-webhook) tem timeout de 5s para responder ao PSP. Se o processamento passar disso, publicamos no Kafka (tópico pix.charge.confirmed) e respondemos 200 na hora; o crédito é feito pelo consumer.",
+      "tags": [
+        "pix",
+        "webhook"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 150
+    },
+    {
+      "id": "m013",
+      "topic": "PIX — webhook de devolução",
+      "content": "O fluxo de devolução usa timeout de 15s no pix-refund-webhook, porque precisamos consultar o ledger antes de confirmar. Retries do PSP: 3 tentativas com backoff de 1, 5 e 30 min. Não reaproveitar o handler da cobrança.",
+      "tags": [
+        "pix",
+        "refund",
+        "webhook"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 110
+    },
+    {
+      "id": "m014",
+      "topic": "PIX — dynamic QR code expiration",
+      "content": "Dynamic PIX QR codes (cobv) expire after 30 minutes by default; merchants can override between 5 minutes and 24 hours via the expiresIn field. Static QR codes never expire and carry no amount lock.",
+      "tags": [
+        "pix",
+        "qrcode"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 140
+    },
+    {
+      "id": "m015",
+      "topic": "PayBridge quirk — 200 on duplicate txid",
+      "content": "PayBridge's PUT /cob/{txid} returns 200 with the ORIGINAL charge body when the txid already exists, instead of 409. Always compare amount and expiresAt in the response; on mismatch raise PIX_TXID_CONFLICT and generate a new txid.",
+      "tags": [
+        "vendor",
+        "pix",
+        "paybridge"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 100
+    },
+    {
+      "id": "m016",
+      "topic": "PIX — geração do txid",
+      "content": "txid é gerado como ULID sem hífens (26 caracteres) com prefixo 'PG', total de 28 caracteres — o limite do BACEN é 35. Gerado em src/pix/txid.ts; nunca reutilizar txid entre tentativas.",
+      "tags": [
+        "pix",
+        "conventions"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 190
+    },
+    {
+      "id": "m017",
+      "topic": "PIX — conciliação diária com o PSP",
+      "content": "O job pix-recon roda às 03:15 BRT, compara o extrato do PSP com o ledger e grava divergências em recon.pix_mismatches. Divergência acima de R$ 1.000 abre alerta P2 no canal #fin-ops.",
+      "tags": [
+        "pix",
+        "reconciliation",
+        "data"
+      ],
+      "agent": "data-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 90
+    },
+    {
+      "id": "m018",
+      "topic": "PIX — refund eligibility window",
+      "content": "PIX refunds are allowed up to 90 days after the original payment, per BACEN rules; older ones are rejected with REFUND_WINDOW_EXPIRED. Partial refunds are allowed, max 10 per original transaction, and their sum can't exceed the original amount.",
+      "tags": [
+        "pix",
+        "refund"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 125
+    },
+    {
+      "id": "m019",
+      "topic": "PIX — PSP único PayBridge",
+      "content": "Toda cobrança e liquidação PIX passa pelo PayBridge, sem PSP secundário. Escolhido por custo (R$ 0,03 por transação) e por ser o único com API de cobv pronta. Integração em src/pix/paybridge/.",
+      "tags": [
+        "pix",
+        "psp",
+        "paybridge"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 330
+    },
+    {
+      "id": "m020",
+      "topic": "PIX — dual PSP routing with Kobalt failover",
+      "content": "PIX now routes through PayBridge as primary and Kobalt Pay as automatic failover when PayBridge's error rate exceeds 5% over 2 minutes. This supersedes the earlier single-PSP (PayBridge only) decision. The router lives in src/pix/psp-router.ts.",
+      "tags": [
+        "pix",
+        "psp",
+        "kobalt"
+      ],
+      "agent": "backend-agent",
+      "importance": "critical",
+      "lang": "en",
+      "created_days_ago": 45
+    },
+    {
+      "id": "m021",
+      "topic": "Cards — tokenization through CardVault",
+      "content": "Raw PANs never touch our services: the web/mobile SDK tokenizes directly against the CardVault provider and we only store the token, last4 and BIN. This keeps us in PCI SAQ A-EP scope; any change here needs security-agent review.",
+      "tags": [
+        "payments",
+        "card",
+        "pci"
+      ],
+      "agent": "backend-agent",
+      "importance": "critical",
+      "lang": "en",
+      "created_days_ago": 220
+    },
+    {
+      "id": "m022",
+      "topic": "Convenção — dinheiro como inteiro",
+      "content": "Todo valor monetário é inteiro em centavos (BIGINT, campo amount_cents). Nunca usar float nem decimal no código de aplicação. Formatação para R$ só no frontend, via formatBRL().",
+      "tags": [
+        "conventions",
+        "payments",
+        "money"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 280
+    },
+    {
+      "id": "m023",
+      "topic": "Boleto — vencimento e pagamento após o prazo",
+      "content": "Boletos são gerados com vencimento padrão de 3 dias úteis. Depois de vencido, o banco emissor ainda aceita pagamento por até 30 dias com multa de 2% e juros de 1% a.m.; após isso o boleto é baixado.",
+      "tags": [
+        "boleto",
+        "payments"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 170
+    },
+    {
+      "id": "m024",
+      "topic": "Chargebacks — dispute response SLA",
+      "content": "Card chargeback disputes must be answered within 7 calendar days of the acquirer's notification. backend-agent opens a ticket in the DISPUTES queue and data-agent attaches delivery evidence from orders.shipments.",
+      "tags": [
+        "payments",
+        "chargeback"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 115
+    },
+    {
+      "id": "m025",
+      "topic": "DB migrations — pre-deploy Kubernetes Job",
+      "content": "Production DB migrations run as a Kubernetes Job (migrate-job) before new pods roll out, using node-pg-migrate. Migrations must be backward compatible with the previous app version (expand/contract). Never run migrations from a laptop.",
+      "tags": [
+        "database",
+        "migrations",
+        "deploy"
+      ],
+      "agent": "backend-agent",
+      "importance": "critical",
+      "lang": "en",
+      "created_days_ago": 160
+    },
+    {
+      "id": "m026",
+      "topic": "Postgres — índices em tabelas grandes",
+      "content": "Toda criação de índice em tabela com mais de 1M de linhas deve usar CREATE INDEX CONCURRENTLY numa migration separada com disableTransaction. Em março/2026 um índice criado sem isso travou a tabela orders por 4 minutos.",
+      "tags": [
+        "database",
+        "postgres",
+        "migrations"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 130
+    },
+    {
+      "id": "m027",
+      "topic": "Postgres — main cluster on RDS 13",
+      "content": "Main database pagai-main runs on Amazon RDS for PostgreSQL 13.7, db.r5.xlarge Multi-AZ, 1 TB gp3. Good enough for current volume; revisit when we pass 5k TPS.",
+      "tags": [
+        "database",
+        "postgres",
+        "infra"
+      ],
+      "agent": "infra-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 400
+    },
+    {
+      "id": "m028",
+      "topic": "Postgres — upgrade para Aurora PostgreSQL 16",
+      "content": "Migramos o cluster principal pagai-main de RDS Postgres 13 para Aurora PostgreSQL 16.2 (db.r7g.2xlarge, 1 writer + 2 readers). A decisão anterior de RDS 13 está obsoleta. Upgrade feito via blue/green com 40s de indisponibilidade.",
+      "tags": [
+        "database",
+        "postgres",
+        "infra"
+      ],
+      "agent": "infra-agent",
+      "importance": "critical",
+      "lang": "pt",
+      "created_days_ago": 60
+    },
+    {
+      "id": "m029",
+      "topic": "Postgres — pooling com PgBouncer",
+      "content": "Todos os serviços conectam via PgBouncer em modo transaction (pgbouncer.pagai.internal:6432), pool_size 40 por serviço. Por isso não usar prepared statements nomeados nem SET de sessão, porque a conexão física muda entre transações.",
+      "tags": [
+        "database",
+        "postgres",
+        "pgbouncer"
+      ],
+      "agent": "infra-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 150
+    },
+    {
+      "id": "m030",
+      "topic": "DB — when to use read replicas",
+      "content": "Read-only endpoints (statements, reports) may use the reader endpoint via the db.replica() helper. Replica lag can reach 2–3 s at peak, so never read-your-own-write from the replica right after creating a payment.",
+      "tags": [
+        "database",
+        "replicas"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 55
+    },
+    {
+      "id": "m031",
+      "topic": "Backups do banco — retenção",
+      "content": "Snapshots automáticos do Aurora ficam 35 dias. Um snapshot mensal é copiado para a conta AWS pagai-backup (sa-east-1 → us-east-1) e retido por 5 anos por exigência regulatória.",
+      "tags": [
+        "backup",
+        "database",
+        "compliance"
+      ],
+      "agent": "data-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 75
+    },
+    {
+      "id": "m032",
+      "topic": "Soft delete vs LGPD erasure",
+      "content": "Tables with customer data use soft delete (deleted_at timestamptz) EXCEPT when an LGPD erasure request applies: then PII columns are hard-deleted and an anonymized row is kept for accounting. See docs/adr/0021-lgpd-erasure.md.",
+      "tags": [
+        "database",
+        "conventions",
+        "lgpd"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 240
+    },
+    {
+      "id": "m033",
+      "topic": "Deploy de produção — ArgoCD com aprovação",
+      "content": "Deploy em produção é feito pelo ArgoCD (app pagai-prod) com sync manual: precisa de aprovação de uma pessoa do on-call no Slack #deploys. Janela bloqueada na sexta após 16h e em véspera de feriado.",
+      "tags": [
+        "deploy",
+        "production",
+        "argocd"
+      ],
+      "agent": "infra-agent",
+      "importance": "critical",
+      "lang": "pt",
+      "created_days_ago": 140
+    },
+    {
+      "id": "m034",
+      "topic": "Staging — auto-sync a cada merge",
+      "content": "Staging (pagai-staging) faz auto-sync no ArgoCD a cada merge na main; a tag da imagem é o SHA curto do commit. O banco de staging é resetado com dados sintéticos todo domingo às 02:00.",
+      "tags": [
+        "deploy",
+        "staging",
+        "argocd"
+      ],
+      "agent": "infra-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 140
+    },
+    {
+      "id": "m035",
+      "topic": "Production rollouts — canary steps",
+      "content": "Production rollouts use Argo Rollouts canary: 5% → 25% → 50% → 100% with 10-minute pauses. Auto-abort if the 5xx rate goes above 1% or p99 latency above 800 ms (AnalysisTemplate http-health).",
+      "tags": [
+        "deploy",
+        "canary",
+        "production"
+      ],
+      "agent": "infra-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 120
+    },
+    {
+      "id": "m036",
+      "topic": "Rolling back a bad release",
+      "content": "To roll back prod, run 'argo rollouts undo pagai-api -n prod' or click Rollback in ArgoCD. Do NOT revert the git commit first or ArgoCD will fight you. DB migrations are never rolled back automatically.",
+      "tags": [
+        "deploy",
+        "rollback"
+      ],
+      "agent": "infra-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 100
+    },
+    {
+      "id": "m037",
+      "topic": "Kubernetes — clusters EKS",
+      "content": "Clusters EKS: pagai-prod (Kubernetes 1.30) e pagai-nonprod (1.31, staging + dev). Nós gerenciados pelo Karpenter, com consolidação ligada. Upgrade de versão sempre começa pelo nonprod e espera 2 semanas.",
+      "tags": [
+        "k8s",
+        "infra"
+      ],
+      "agent": "infra-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 85
+    },
+    {
+      "id": "m038",
+      "topic": "Terraform — remote state and locking",
+      "content": "Terraform state lives in S3 bucket pagai-tfstate (versioned) with DynamoDB lock table tf-locks; one state per stack under infra/stacks/*. Never use -target in prod without a second reviewer.",
+      "tags": [
+        "terraform",
+        "infra"
+      ],
+      "agent": "infra-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 200
+    },
+    {
+      "id": "m039",
+      "topic": "AWS — região principal e DR",
+      "content": "Região principal sa-east-1 (São Paulo). DR em warm standby em us-east-1 com RPO de 15 min e RTO de 2h. Teste de DR é semestral; o último foi em agosto/2026 e levou 1h40.",
+      "tags": [
+        "aws",
+        "dr",
+        "infra"
+      ],
+      "agent": "infra-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 65
+    },
+    {
+      "id": "m040",
+      "topic": "Secrets — AWS Secrets Manager + External Secrets",
+      "content": "App secrets are stored in AWS Secrets Manager under /pagai/{env}/{service}/ and synced into Kubernetes by External Secrets Operator every 1h. Never put secrets in Helm values or committed .env files.",
+      "tags": [
+        "secrets",
+        "security",
+        "infra"
+      ],
+      "agent": "infra-agent",
+      "importance": "critical",
+      "lang": "en",
+      "created_days_ago": 180
+    },
+    {
+      "id": "m041",
+      "topic": "CloudFront — assets do web app",
+      "content": "Assets estáticos do web app são servidos via CloudFront (distribuição E2PAGAIWEB) com cache de 1 ano para arquivos com hash no nome e no-cache para o index.html.",
+      "tags": [
+        "cdn",
+        "frontend",
+        "infra"
+      ],
+      "agent": "infra-agent",
+      "importance": "low",
+      "lang": "pt",
+      "created_days_ago": 160
+    },
+    {
+      "id": "m042",
+      "topic": "DNS — domínios internos e públicos",
+      "content": "Serviços internos resolvem em *.pagai.internal via zona privada do Route53; APIs públicas ficam em api.pagai.com.br. Não fixar IPs no código: os IPs do NLB mudam quando ele é recriado.",
+      "tags": [
+        "dns",
+        "infra"
+      ],
+      "agent": "infra-agent",
+      "importance": "low",
+      "lang": "pt",
+      "created_days_ago": 230
+    },
+    {
+      "id": "m043",
+      "topic": "Kafka — nomes de tópicos",
+      "content": "Tópicos seguem <domínio>.<entidade>.<evento-no-passado>, ex.: orders.order.created, pix.charge.confirmed. Partições padrão 12, retenção 7 dias; tópicos de ledger são compacted com retenção infinita.",
+      "tags": [
+        "kafka",
+        "conventions"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 210
+    },
+    {
+      "id": "m044",
+      "topic": "Kafka consumers — retries and DLQ",
+      "content": "Consumers retry 3 times in-process with exponential backoff (200 ms base), then publish the message to <topic>.dlq. DLQ messages are replayed manually with scripts/kafka/replay-dlq.ts after the root cause is fixed.",
+      "tags": [
+        "kafka",
+        "dlq",
+        "retries"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 95
+    },
+    {
+      "id": "m045",
+      "topic": "Kafka — cluster MSK",
+      "content": "Kafka roda no Amazon MSK 3.6 (3 brokers kafka.m7g.large, multi-AZ). O Schema Registry é o Glue Schema Registry com compatibilidade BACKWARD; schemas Avro em contracts/avro/.",
+      "tags": [
+        "kafka",
+        "infra"
+      ],
+      "agent": "infra-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 175
+    },
+    {
+      "id": "m046",
+      "topic": "CI — self-hosted GitHub Actions runners",
+      "content": "CI runs on GitHub Actions with self-hosted runners on EKS (actions-runner-controller); builds use the label pagai-ci-large. Hosted runners are only used for the docs site. Average pipeline time is 11 minutes.",
+      "tags": [
+        "ci",
+        "github-actions"
+      ],
+      "agent": "infra-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 130
+    },
+    {
+      "id": "m047",
+      "topic": "CI — quarentena de testes instáveis",
+      "content": "Teste marcado como flaky vai para quarentena com a tag @quarantine e deixa de bloquear o merge; tem 14 dias para ser corrigido, senão é apagado. A lista fica em test/quarantine.json.",
+      "tags": [
+        "ci",
+        "testing",
+        "flaky"
+      ],
+      "agent": "qa-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 70
+    },
+    {
+      "id": "m048",
+      "topic": "CI — gate de cobertura de 70%",
+      "content": "O job de testes falha o PR se a cobertura de linhas do pacote alterado ficar abaixo de 70% (medida pelo c8). Exceções só com a label coverage-waiver aprovada pelo tech lead.",
+      "tags": [
+        "ci",
+        "testing",
+        "coverage"
+      ],
+      "agent": "qa-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 250
+    },
+    {
+      "id": "m049",
+      "topic": "CI — diff coverage gate",
+      "content": "We replaced the 70% package line-coverage gate with an 80% diff-coverage gate: only lines touched by the PR count, enforced by diff-cover in the test job. Overall coverage is now report-only. This supersedes the old 70% rule and the coverage-waiver label.",
+      "tags": [
+        "ci",
+        "testing",
+        "coverage"
+      ],
+      "agent": "qa-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 40
+    },
+    {
+      "id": "m050",
+      "topic": "CI — cache de build das imagens",
+      "content": "Builds Docker usam BuildKit com cache em registry no ECR (repo pagai/cache). Imagem base node:22.11-alpine fixada por digest; o Renovate atualiza toda semana. Isso derrubou o build de 9 para 3 min.",
+      "tags": [
+        "ci",
+        "docker"
+      ],
+      "agent": "infra-agent",
+      "importance": "low",
+      "lang": "pt",
+      "created_days_ago": 145
+    },
+    {
+      "id": "m051",
+      "topic": "Git — proteção da branch main",
+      "content": "A main exige CI verde (jobs lint, test, build e sast) e branch atualizada antes do merge. Merge só via squash. Force-push bloqueado para todos, inclusive admins.",
+      "tags": [
+        "ci",
+        "git",
+        "process"
+      ],
+      "agent": "infra-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 190
+    },
+    {
+      "id": "m052",
+      "topic": "Tracing — OpenTelemetry to Tempo",
+      "content": "All Node services use @opentelemetry/sdk-node with auto-instrumentation; traces go to Grafana Tempo via the otel-collector DaemonSet. Sampling: 10% head-based, plus 100% of errored traces via tail sampling.",
+      "tags": [
+        "observability",
+        "tracing"
+      ],
+      "agent": "infra-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 110
+    },
+    {
+      "id": "m053",
+      "topic": "Logs — formato e campos obrigatórios",
+      "content": "Logs em JSON via pino com campos obrigatórios: service, env, trace_id, request_id e user_id (hash). Proibido logar CPF, PAN, chave PIX completa ou token. Retenção no Loki: 30 dias.",
+      "tags": [
+        "logging",
+        "observability",
+        "lgpd"
+      ],
+      "agent": "infra-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 165
+    },
+    {
+      "id": "m054",
+      "topic": "Alerting — PagerDuty routing",
+      "content": "Alerts with severity=critical page the on-call through PagerDuty service PAGAI-CORE; severity=warning only posts to #alerts. Alertmanager config lives in infra/monitoring/alertmanager.yaml.",
+      "tags": [
+        "alerting",
+        "oncall"
+      ],
+      "agent": "infra-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 100
+    },
+    {
+      "id": "m055",
+      "topic": "SLO — API de pagamentos",
+      "content": "SLO da API de pagamentos: 99,95% de disponibilidade mensal e p99 abaixo de 600 ms em POST /v1/charges. Error budget queimando 2x mais rápido que o normal em 1h dispara alerta crítico.",
+      "tags": [
+        "slo",
+        "observability",
+        "payments"
+      ],
+      "agent": "infra-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 80
+    },
+    {
+      "id": "m056",
+      "topic": "Métricas de negócio no Metabase",
+      "content": "KPIs de negócio (GMV, taxa de aprovação, conversão de PIX) ficam na coleção 'Pagaí KPIs' do Metabase, lendo do ambiente analítico e nunca do Postgres de produção. Atualização a cada 1h.",
+      "tags": [
+        "analytics",
+        "dashboards"
+      ],
+      "agent": "data-agent",
+      "importance": "low",
+      "lang": "pt",
+      "created_days_ago": 150
+    },
+    {
+      "id": "m057",
+      "topic": "Web app — stack",
+      "content": "Web app (apps/web) em Next.js 15 com App Router, React 19, TanStack Query para dados de servidor e Zustand só para estado de UI. Não usar Redux em código novo; o legado em apps/web/src/store/ está congelado.",
+      "tags": [
+        "frontend",
+        "nextjs"
+      ],
+      "agent": "frontend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 200
+    },
+    {
+      "id": "m058",
+      "topic": "Frontend — styling approach",
+      "content": "Components are styled with styled-components v5 using the shared theme in apps/web/src/theme.ts; no global CSS except the reset. Chosen for colocated styles and easy theming.",
+      "tags": [
+        "frontend",
+        "css"
+      ],
+      "agent": "frontend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 310
+    },
+    {
+      "id": "m059",
+      "topic": "Frontend — Tailwind CSS 4 no lugar de styled-components",
+      "content": "Abandonamos styled-components por incompatibilidade com React Server Components e custo de runtime; todo componente novo usa Tailwind CSS 4 com tokens em packages/ui/tokens.css. Componentes antigos migram quando forem tocados. Substitui a decisão anterior.",
+      "tags": [
+        "frontend",
+        "css",
+        "decision"
+      ],
+      "agent": "frontend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 50
+    },
+    {
+      "id": "m060",
+      "topic": "Forms — shared zod schemas",
+      "content": "Forms use react-hook-form + zod schemas shared with the backend from packages/contracts. CPF/CNPJ checks use validateTaxId() in packages/contracts/src/br.ts — never write a custom regex for tax IDs.",
+      "tags": [
+        "frontend",
+        "forms",
+        "validation"
+      ],
+      "agent": "frontend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 140
+    },
+    {
+      "id": "m061",
+      "topic": "Feature flags com Unleash",
+      "content": "Feature flags via Unleash (unleash.pagai.internal). No front, usar o hook useFlag('nome-da-flag'); flags temporárias precisam de dono e data de remoção no campo description, senão o lint de flags reclama.",
+      "tags": [
+        "frontend",
+        "feature-flags"
+      ],
+      "agent": "frontend-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 120
+    },
+    {
+      "id": "m062",
+      "topic": "Frontend — internacionalização",
+      "content": "Web e mobile são só pt-BR por enquanto, mas toda string passa pelos arquivos do next-intl (messages/pt-BR.json) para que adicionar es-AR depois seja barato. Nunca deixar texto de usuário hardcoded no JSX.",
+      "tags": [
+        "frontend",
+        "i18n"
+      ],
+      "agent": "frontend-agent",
+      "importance": "low",
+      "lang": "pt",
+      "created_days_ago": 260
+    },
+    {
+      "id": "m063",
+      "topic": "Acessibilidade — meta WCAG",
+      "content": "Meta: WCAG 2.1 AA no checkout e no onboarding. axe-core roda dentro do Playwright em toda PR; contraste mínimo 4.5:1 e todo input precisa de label associado.",
+      "tags": [
+        "frontend",
+        "a11y"
+      ],
+      "agent": "frontend-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 90
+    },
+    {
+      "id": "m064",
+      "topic": "Checkout — waiting for PIX confirmation",
+      "content": "Web checkout polls GET /v1/charges/{id} every 3 s for up to 10 minutes while showing the PIX QR code, then switches to 'aguardando confirmação'. We tried SSE, but some merchants' corporate proxies killed long-lived connections.",
+      "tags": [
+        "frontend",
+        "pix",
+        "checkout"
+      ],
+      "agent": "frontend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 85
+    },
+    {
+      "id": "m065",
+      "topic": "App mobile — React Native + Expo",
+      "content": "App do consumidor (apps/mobile) é React Native 0.76 com Expo SDK 52 e EAS Build. Atualizações OTA via EAS Update só para mudanças de JS; qualquer mudança nativa exige nova versão nas lojas.",
+      "tags": [
+        "mobile",
+        "react-native"
+      ],
+      "agent": "frontend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 180
+    },
+    {
+      "id": "m066",
+      "topic": "Mobile — minimum OS versions",
+      "content": "Minimum supported versions: Android 9 (API 28) and iOS 15. Dropping older versions cut about 1.8% of MAU; approved by PM in July.",
+      "tags": [
+        "mobile",
+        "compatibility"
+      ],
+      "agent": "pm-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 95
+    },
+    {
+      "id": "m067",
+      "topic": "App — vínculo de dispositivo e root",
+      "content": "Login no app vincula o dispositivo (device_id + chave no Secure Enclave/Keystore). Em aparelho com root ou jailbreak detectado, PIX acima de R$ 200 é bloqueado e o app fica só em modo consulta.",
+      "tags": [
+        "mobile",
+        "security",
+        "pix"
+      ],
+      "agent": "security-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 130
+    },
+    {
+      "id": "m068",
+      "topic": "Push notifications — priorities and caps",
+      "content": "Push notifications are sent by notify-svc through Expo Push for both platforms. Transactional pushes (PIX received) use priority high; marketing pushes go through a separate queue capped at 1 per user per day.",
+      "tags": [
+        "mobile",
+        "push",
+        "notifications"
+      ],
+      "agent": "frontend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 110
+    },
+    {
+      "id": "m069",
+      "topic": "Mobile — biweekly store releases",
+      "content": "The consumer app ships to the App Store and Play Store every other Thursday; the release branch is cut on Monday of release week. Out-of-band hotfixes only for SEV1/SEV2.",
+      "tags": [
+        "mobile",
+        "release"
+      ],
+      "agent": "frontend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 280
+    },
+    {
+      "id": "m070",
+      "topic": "App — release semanal nas lojas",
+      "content": "A partir de setembro o app vai para as lojas toda terça (release semanal), substituindo a cadência quinzenal. Corte da branch release/* na segunda às 18h e rollout gradual 10% → 50% → 100% na Play Store.",
+      "tags": [
+        "mobile",
+        "release"
+      ],
+      "agent": "frontend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 30
+    },
+    {
+      "id": "m071",
+      "topic": "Data — warehouse no Redshift",
+      "content": "Warehouse analítico em Amazon Redshift (2 nós ra3.xlplus); cargas diárias via COPY a partir do S3 às 04:00. O Metabase conecta direto no Redshift.",
+      "tags": [
+        "data",
+        "warehouse"
+      ],
+      "agent": "data-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 360
+    },
+    {
+      "id": "m072",
+      "topic": "Analytics — Iceberg lakehouse queried with Trino",
+      "content": "Redshift was decommissioned in June 2026. Analytics tables now live as Apache Iceberg on s3://pagai-lake and are queried through Trino (trino.pagai.internal:8443); Metabase was repointed to Trino. This replaces the Redshift warehouse decision.",
+      "tags": [
+        "data",
+        "warehouse",
+        "trino"
+      ],
+      "agent": "data-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 110
+    },
+    {
+      "id": "m073",
+      "topic": "CDC — Debezium on Kafka Connect",
+      "content": "Change data capture from pagai-main uses Debezium 2.7 on Kafka Connect, publishing to cdc.<schema>.<table> topics. It relies on the logical replication slot debezium_main; a stuck connector makes WAL pile up on the writer.",
+      "tags": [
+        "data",
+        "cdc",
+        "kafka"
+      ],
+      "agent": "data-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 140
+    },
+    {
+      "id": "m074",
+      "topic": "Airflow — convenções de DAG",
+      "content": "DAGs no Airflow 2.10 (MWAA) ficam em data/dags/. Convenção: um DAG por domínio, schedule em BRT usando pendulum, retries=2 e SLA de 2h para os DAGs de finanças.",
+      "tags": [
+        "data",
+        "airflow"
+      ],
+      "agent": "data-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 160
+    },
+    {
+      "id": "m075",
+      "topic": "Lake — PII tokenization",
+      "content": "PII columns (cpf, email, phone) are tokenized with HMAC-SHA256 before landing in the lake (key in Secrets Manager at /pagai/prod/data/pii-hmac). Only the fraud team role can detokenize, through the pii-vault API.",
+      "tags": [
+        "data",
+        "pii",
+        "lgpd"
+      ],
+      "agent": "data-agent",
+      "importance": "critical",
+      "lang": "en",
+      "created_days_ago": 120
+    },
+    {
+      "id": "m076",
+      "topic": "Modelo antifraude — features e re-treino",
+      "content": "O modelo fraud-score v3 (XGBoost) usa 42 features, entre elas velocidade de PIX por CPF em 1h/24h, idade da conta e troca recente de dispositivo. Re-treino mensal; threshold de bloqueio 0,87.",
+      "tags": [
+        "fraud",
+        "ml",
+        "data"
+      ],
+      "agent": "data-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 60
+    },
+    {
+      "id": "m077",
+      "topic": "dbt — model layers and tests",
+      "content": "dbt models: staging (stg_), intermediate (int_), marts (fct_/dim_). Every mart needs unique + not_null tests on its primary key and an owner in meta. CI runs dbt build --select state:modified+.",
+      "tags": [
+        "data",
+        "dbt",
+        "conventions"
+      ],
+      "agent": "data-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 105
+    },
+    {
+      "id": "m078",
+      "topic": "Testes — ferramentas por camada",
+      "content": "Backend: Vitest para unitário e Testcontainers (Postgres 16 + Redis 7) para integração. Front: Playwright para E2E, com 30 cenários críticos rodando em toda PR; o restante roda no nightly.",
+      "tags": [
+        "testing",
+        "vitest",
+        "playwright"
+      ],
+      "agent": "qa-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 170
+    },
+    {
+      "id": "m079",
+      "topic": "PSP sandboxes — limitations",
+      "content": "The PayBridge sandbox never sends refund webhooks and always settles PIX in ~2 s, so refund flows must be tested with our local PSP simulator (tools/psp-sim, port 4010). The Kobalt sandbox does send them but rate-limits at 5 req/s.",
+      "tags": [
+        "testing",
+        "pix",
+        "sandbox",
+        "vendor"
+      ],
+      "agent": "qa-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 75
+    },
+    {
+      "id": "m080",
+      "topic": "Testes — CPFs de teste",
+      "content": "Em testes usar apenas CPFs gerados por generateFakeCpf() (dígito verificador válido, sempre começando com 999). Nunca usar CPF real de funcionário, nem em staging.",
+      "tags": [
+        "testing",
+        "lgpd"
+      ],
+      "agent": "qa-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 210
+    },
+    {
+      "id": "m081",
+      "topic": "Load test — charges baseline",
+      "content": "k6 load test (tests/load/charges.js) baseline from September: POST /v1/charges sustains 1,200 rps at p99 420 ms on 6 pods. Beyond ~1,500 rps PgBouncer saturates before the app does.",
+      "tags": [
+        "testing",
+        "performance",
+        "k6"
+      ],
+      "agent": "qa-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 35
+    },
+    {
+      "id": "m082",
+      "topic": "QA — regressão antes do release do app",
+      "content": "Antes de cada release mobile, o qa-agent roda a suíte de regressão no BrowserStack (Android 9, 13, 15; iOS 15, 17, 18), cerca de 45 min. O release só sai com 0 falhas nos fluxos de PIX e login.",
+      "tags": [
+        "qa",
+        "mobile",
+        "release"
+      ],
+      "agent": "qa-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 25
+    },
+    {
+      "id": "m083",
+      "topic": "INC-0412 — PIX double credit",
+      "content": "Incident INC-0412: ~180 customers received PIX credits twice because the charge-confirmed consumer was not idempotent across a Kafka rebalance. Fix: unique constraint on ledger.entries(e2e_id) plus consumer-side dedupe. Duration 47 min.",
+      "tags": [
+        "incident",
+        "pix",
+        "postmortem"
+      ],
+      "agent": "backend-agent",
+      "importance": "critical",
+      "lang": "en",
+      "created_days_ago": 240
+    },
+    {
+      "id": "m084",
+      "topic": "INC-0467 — PgBouncer fora do ar",
+      "content": "INC-0467: o PgBouncer ficou sem file descriptors (ulimit 1024) no pico do Dia das Mães e derrubou a API por 22 min. Corrigido para ulimit 65536 e criamos alerta quando cl_waiting > 50.",
+      "tags": [
+        "incident",
+        "pgbouncer",
+        "postmortem"
+      ],
+      "agent": "infra-agent",
+      "importance": "critical",
+      "lang": "pt",
+      "created_days_ago": 150
+    },
+    {
+      "id": "m085",
+      "topic": "INC-0489 — expired certificate on hooks endpoint",
+      "content": "INC-0489: the TLS certificate for hooks.pagai.com.br expired because it was the only cert not managed by cert-manager. PSP webhooks failed for 3h; the PSP retried, so no money was lost. All certs are now in cert-manager with a 21-day expiry alert.",
+      "tags": [
+        "incident",
+        "tls",
+        "postmortem"
+      ],
+      "agent": "infra-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 110
+    },
+    {
+      "id": "m086",
+      "topic": "INC-0501 — fila de e-mail travada",
+      "content": "INC-0501: o worker de e-mail transacional travou por causa de um template Handlebars com loop infinito; 40 mil comprovantes atrasaram 6h. Agora os templates passam por teste de renderização no CI e o worker tem timeout de 10s por mensagem.",
+      "tags": [
+        "incident",
+        "email",
+        "postmortem"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 55
+    },
+    {
+      "id": "m087",
+      "topic": "INC-0510 — leaked sandbox credential",
+      "content": "INC-0510: a contractor committed a PayBridge sandbox API key to a public gist. It was rotated within 20 minutes, no production impact. Follow-up: gitleaks added to pre-commit and to the CI sast job.",
+      "tags": [
+        "incident",
+        "security",
+        "secrets"
+      ],
+      "agent": "security-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 40
+    },
+    {
+      "id": "m088",
+      "topic": "Roadmap — PIX Parcelado adiado",
+      "content": "PIX Parcelado ficou fora do roadmap do Q4/2026; a prioridade é PIX Automático (recorrência), que tem prazo regulatório. Revisitar em fevereiro/2027.",
+      "tags": [
+        "product",
+        "roadmap",
+        "pix"
+      ],
+      "agent": "pm-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 50
+    },
+    {
+      "id": "m089",
+      "topic": "PIX Automático — v1 scope",
+      "content": "PIX Automático v1: only fixed-amount monthly subscriptions, max R$ 5,000, and the consumer can cancel anytime from the app. Variable amounts and retries outside the payment window are v2.",
+      "tags": [
+        "product",
+        "pix",
+        "recurring"
+      ],
+      "agent": "pm-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 45
+    },
+    {
+      "id": "m090",
+      "topic": "Precificação — taxa do lojista por PIX",
+      "content": "Taxa padrão para o lojista: 0,99% por PIX recebido, mínimo R$ 0,05 e teto de R$ 9,90. Lojistas com GMV acima de R$ 1M/mês negociam caso a caso com o comercial.",
+      "tags": [
+        "product",
+        "pricing",
+        "pix"
+      ],
+      "agent": "pm-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 130
+    },
+    {
+      "id": "m091",
+      "topic": "Pricing — free PIX allowance for new merchants",
+      "content": "New merchants get their first 100 PIX receipts per month free, with no end date, to compete with banks' free offers. The fee applies from the 101st PIX of the month.",
+      "tags": [
+        "product",
+        "pricing"
+      ],
+      "agent": "pm-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 200
+    },
+    {
+      "id": "m092",
+      "topic": "Precificação — fim da cortesia de 100 PIX",
+      "content": "A cortesia de 100 PIX grátis por mês para lojistas novos foi descontinuada em out/2026. Agora o lojista novo tem 30 dias de taxa zero e depois paga a taxa padrão. Substitui a regra anterior dos 100 PIX/mês.",
+      "tags": [
+        "product",
+        "pricing"
+      ],
+      "agent": "pm-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 20
+    },
+    {
+      "id": "m093",
+      "topic": "Merchant onboarding — KYC steps",
+      "content": "Merchant onboarding requires: CNPJ lookup, partner selfie + ID document via the KYC vendor IDCheck, and bank account validation with a R$ 0,01 PIX. Target: approval in under 10 minutes for 80% of merchants.",
+      "tags": [
+        "product",
+        "onboarding",
+        "kyc"
+      ],
+      "agent": "pm-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 100
+    },
+    {
+      "id": "m094",
+      "topic": "Limite de PIX no período noturno",
+      "content": "Seguindo regra do BACEN, PIX entre 20h e 6h para pessoa física tem limite padrão de R$ 1.000. O cliente pode pedir aumento pelo app, com efetivação após 24h a 48h.",
+      "tags": [
+        "product",
+        "pix",
+        "limits",
+        "compliance"
+      ],
+      "agent": "pm-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 160
+    },
+    {
+      "id": "m095",
+      "topic": "PIX — daytime limits for individuals",
+      "content": "Default daytime PIX limits (06:00–20:00) for individuals: R$ 5,000 per transaction and R$ 20,000 per day. Increases up to R$ 50,000 take effect immediately for KYC level 2 customers.",
+      "tags": [
+        "product",
+        "pix",
+        "limits"
+      ],
+      "agent": "pm-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 160
+    },
+    {
+      "id": "m096",
+      "topic": "Checkout — métrica norte",
+      "content": "North star do checkout: conversão de PIX iniciado → pago, hoje em 78%. Meta do semestre: 85%. A maior perda é QR code que expira sem pagamento.",
+      "tags": [
+        "product",
+        "metrics",
+        "checkout"
+      ],
+      "agent": "pm-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 65
+    },
+    {
+      "id": "m097",
+      "topic": "API error code format",
+      "content": "API error codes are UPPER_SNAKE_CASE, prefixed by domain (PIX_, AUTH_, CARD_), returned as {code, message, request_id}. Never reuse a code with a different meaning; the registry is packages/contracts/src/errors.ts.",
+      "tags": [
+        "conventions",
+        "api",
+        "errors"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 230
+    },
+    {
+      "id": "m098",
+      "topic": "Backend — estrutura de pastas",
+      "content": "Serviços Node seguem src/{domain}/{handlers,services,repos}.ts. Regra: handler nunca acessa repo direto, sempre via service. O eslint-plugin-boundaries quebra o build se a regra for violada.",
+      "tags": [
+        "conventions",
+        "architecture"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 250
+    },
+    {
+      "id": "m099",
+      "topic": "Convenção de mensagens de commit",
+      "content": "Commits seguem Conventional Commits (feat:, fix:, chore:) com a chave do Jira no escopo, ex.: fix(PAG-1234): corrige arredondamento. O release-please usa isso para gerar changelog e versão.",
+      "tags": [
+        "conventions",
+        "git"
+      ],
+      "agent": "backend-agent",
+      "importance": "low",
+      "lang": "pt",
+      "created_days_ago": 270
+    },
+    {
+      "id": "m100",
+      "topic": "Datas — UTC no banco, BRT na borda",
+      "content": "O banco guarda tudo em timestamptz UTC; conversão para America/Sao_Paulo só na borda (API de extrato e frontend). O cut-off de liquidação é calculado em BRT usando date-fns-tz.",
+      "tags": [
+        "conventions",
+        "timezone"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 185
+    },
+    {
+      "id": "m101",
+      "topic": "TypeScript — strict settings",
+      "content": "All packages use TypeScript 5.6 with strict: true and noUncheckedIndexedAccess. 'any' is banned by lint except in *.test.ts files; use unknown plus zod parsing at boundaries.",
+      "tags": [
+        "conventions",
+        "typescript"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 175
+    },
+    {
+      "id": "m102",
+      "topic": "API pública — versionamento",
+      "content": "A API pública é versionada no path (/v1, /v2). Mudança breaking só em versão nova; a versão antiga é mantida por 12 meses após o anúncio, com header Sunset nas respostas.",
+      "tags": [
+        "api",
+        "conventions",
+        "versioning"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 145
+    },
+    {
+      "id": "m103",
+      "topic": "Splitting amounts into installments",
+      "content": "When splitting amounts (fees, installments) we round half-up per cent and push the leftover cent(s) to the first installment, so the parts always sum to the total. Use splitCents() from packages/money; never Math.round on floats.",
+      "tags": [
+        "conventions",
+        "payments",
+        "money"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 120
+    },
+    {
+      "id": "m104",
+      "topic": "IDCheck — comportamento da API de KYC",
+      "content": "A API do IDCheck às vezes devolve status PENDING por até 20 min em selfies; não tratar como reprovação. O webhook deles não tem assinatura HMAC, então sempre reconsultar GET /verifications/{id} antes de aprovar o lojista.",
+      "tags": [
+        "vendor",
+        "kyc",
+        "idcheck"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 90
+    },
+    {
+      "id": "m105",
+      "topic": "Kobalt Pay — webhook signature check",
+      "content": "Kobalt signs webhooks with HMAC-SHA512 in header X-Kobalt-Signature, computed over the raw body bytes BEFORE JSON parsing; express.json() breaks verification. Use the rawBody middleware in src/pix/kobalt/webhook.ts.",
+      "tags": [
+        "vendor",
+        "kobalt",
+        "webhook"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 40
+    },
+    {
+      "id": "m106",
+      "topic": "PayBridge — mTLS nos webhooks",
+      "content": "O PayBridge exige mTLS nos webhooks: nosso endpoint hooks.pagai.com.br precisa apresentar certificado cliente emitido pela CA deles, renovado anualmente (o próximo vence em março/2027).",
+      "tags": [
+        "vendor",
+        "paybridge",
+        "tls",
+        "webhook"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 120
+    },
+    {
+      "id": "m107",
+      "topic": "OTP SMS — providers and fallback",
+      "content": "OTP SMS goes through TextaBR as primary and SMSFlux as fallback after 2 delivery failures within 60 s. TextaBR silently drops messages containing URLs, so OTP texts must never include links.",
+      "tags": [
+        "vendor",
+        "sms",
+        "otp"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 135
+    },
+    {
+      "id": "m108",
+      "topic": "Consulta de CNPJ — ReceitaData",
+      "content": "Consulta de CNPJ via API ReceitaData com cache de 7 dias no Postgres (tabela kyc.cnpj_cache). Limite contratado de 3 req/s; acima disso eles devolvem 429 sem Retry-After, então usamos fila com token bucket.",
+      "tags": [
+        "vendor",
+        "kyc",
+        "cnpj"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 80
+    },
+    {
+      "id": "m109",
+      "topic": "Transactional email — Amazon SES limits",
+      "content": "Transactional email goes through Amazon SES in sa-east-1 with a sending quota of 50 msg/s. Bounce rate must stay under 5% or AWS pauses the account; bounces arrive via SNS topic ses-bounces and feed the suppression list.",
+      "tags": [
+        "email",
+        "ses",
+        "aws"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 160
+    },
+    {
+      "id": "m110",
+      "topic": "Plantão — escala e escalonamento",
+      "content": "On-call semanal, troca na segunda às 10h, com primário e secundário. O primário tem 15 min para dar ack no PagerDuty; depois escala para o secundário e então para o tech lead. Compensação: 1 day-off por semana de plantão.",
+      "tags": [
+        "process",
+        "oncall"
+      ],
+      "agent": "pm-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 140
+    },
+    {
+      "id": "m111",
+      "topic": "Process — two approvals per PR",
+      "content": "Every pull request needs 2 approvals from engineers of the owning team before merge, regardless of size. Self-approval by agents doesn't count.",
+      "tags": [
+        "process",
+        "review"
+      ],
+      "agent": "pm-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 290
+    },
+    {
+      "id": "m112",
+      "topic": "Review — 1 aprovação de CODEOWNER",
+      "content": "Mudamos a política de review: basta 1 aprovação, desde que seja de um CODEOWNER do diretório alterado. Mudanças em src/ledger/ e src/pix/ continuam exigindo 2 aprovações. Substitui a regra antiga de 2 aprovações para tudo.",
+      "tags": [
+        "process",
+        "review"
+      ],
+      "agent": "pm-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 35
+    },
+    {
+      "id": "m113",
+      "topic": "Incident severity levels",
+      "content": "SEV1: money movement broken or data leak — all hands, status page update every 30 min. SEV2: degraded payments or one partner down. SEV3: internal tooling. Blameless postmortem mandatory for SEV1/SEV2 within 5 business days.",
+      "tags": [
+        "process",
+        "incident"
+      ],
+      "agent": "pm-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 200
+    },
+    {
+      "id": "m114",
+      "topic": "Agentes — papéis e responsabilidades",
+      "content": "pm-agent prioriza o backlog e escreve specs; backend-agent e frontend-agent implementam; qa-agent aprova releases; security-agent revisa toda mudança em auth, pix e secrets antes do merge.",
+      "tags": [
+        "process",
+        "agents"
+      ],
+      "agent": "pm-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 300
+    },
+    {
+      "id": "m115",
+      "topic": "Black Friday change freeze",
+      "content": "Change freeze from Nov 20 to Dec 2, 2026: only SEV1/SEV2 fixes, each approved by the CTO and the on-call lead. Feature flags may still be toggled during the freeze.",
+      "tags": [
+        "process",
+        "freeze",
+        "deploy"
+      ],
+      "agent": "pm-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 15
+    },
+    {
+      "id": "m116",
+      "topic": "RFCs para decisões grandes",
+      "content": "Decisões que afetam mais de um time ou custam mais de US$ 2k/mês exigem RFC em docs/rfcs/ com 5 dias úteis de comentários. Template em docs/rfcs/0000-template.md.",
+      "tags": [
+        "process",
+        "rfc"
+      ],
+      "agent": "pm-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 220
+    },
+    {
+      "id": "m117",
+      "topic": "Dependency vulnerability policy",
+      "content": "Dependabot plus osv-scanner run in CI. Critical CVEs must be patched within 72h, high within 14 days. Exceptions are tracked in security/exceptions.yaml with an expiry date.",
+      "tags": [
+        "security",
+        "dependencies"
+      ],
+      "agent": "security-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 150
+    },
+    {
+      "id": "m118",
+      "topic": "Criptografia de dados sensíveis em coluna",
+      "content": "Chave PIX e telefone do cliente são criptografados em nível de coluna com envelope encryption (AWS KMS, chave pagai-pii-cmk) via packages/crypto. O CPF é guardado com hash HMAC para busca e uma versão criptografada.",
+      "tags": [
+        "security",
+        "encryption",
+        "lgpd"
+      ],
+      "agent": "security-agent",
+      "importance": "critical",
+      "lang": "pt",
+      "created_days_ago": 190
+    },
+    {
+      "id": "m119",
+      "topic": "AWS WAF on the public API",
+      "content": "AWS WAF in front of api.pagai.com.br: managed rule sets Core + KnownBadInputs, geo-block outside BR/US/PT for the merchant API, and a rate-based rule of 2,000 requests per 5 minutes per IP.",
+      "tags": [
+        "security",
+        "waf"
+      ],
+      "agent": "security-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 105
+    },
+    {
+      "id": "m120",
+      "topic": "Pentest externo de 2026",
+      "content": "O pentest externo anual, feito em julho/2026, encontrou 2 achados médios: IDOR em GET /v1/statements/{id} e falta de rate limit no reset de senha. Ambos corrigidos em 10 dias.",
+      "tags": [
+        "security",
+        "pentest"
+      ],
+      "agent": "security-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 85
+    },
+    {
+      "id": "m121",
+      "topic": "Senhas — bcrypt",
+      "content": "Senhas de clientes são guardadas com bcrypt cost 10 (lib bcryptjs). Custo escolhido para manter o login abaixo de 100 ms nos pods atuais.",
+      "tags": [
+        "security",
+        "passwords"
+      ],
+      "agent": "security-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 380
+    },
+    {
+      "id": "m122",
+      "topic": "Password storage — Argon2id",
+      "content": "New password hashes use Argon2id (m=64 MiB, t=3, p=1) via the argon2 npm package. Legacy bcrypt hashes are rehashed transparently on the next successful login. This replaces the bcrypt cost 10 decision.",
+      "tags": [
+        "security",
+        "passwords"
+      ],
+      "agent": "security-agent",
+      "importance": "critical",
+      "lang": "en",
+      "created_days_ago": 90
+    },
+    {
+      "id": "m123",
+      "topic": "CORS policy for the public API",
+      "content": "The public API allows CORS only from merchant-registered origins (merchants.allowed_origins); the consumer web app is same-origin. Wildcard '*' is forbidden, even in staging.",
+      "tags": [
+        "security",
+        "cors",
+        "api"
+      ],
+      "agent": "security-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 115
+    },
+    {
+      "id": "m124",
+      "topic": "Ledger — saldo calculado na hora",
+      "content": "O saldo da conta é calculado com SUM(amount_cents) sobre ledger.entries a cada consulta. Simples e sempre consistente; o volume atual (2M de linhas) não justifica cache.",
+      "tags": [
+        "ledger",
+        "balance"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 340
+    },
+    {
+      "id": "m125",
+      "topic": "Ledger — balance snapshots",
+      "content": "Balances are now read from ledger.balance_snapshots, updated in the same transaction as each entry (SELECT ... FOR UPDATE on the account row). Summing entries per request stopped scaling past 40M rows; this replaces the on-the-fly sum. A nightly job checks snapshots against the full sum.",
+      "tags": [
+        "ledger",
+        "balance"
+      ],
+      "agent": "backend-agent",
+      "importance": "critical",
+      "lang": "en",
+      "created_days_ago": 25
+    },
+    {
+      "id": "m126",
+      "topic": "Métricas de aplicação no CloudWatch",
+      "content": "Métricas customizadas dos serviços são enviadas ao CloudWatch via Embedded Metric Format no stdout; dashboards e alarmes ficam no console da AWS, namespace Pagai/App.",
+      "tags": [
+        "observability",
+        "metrics"
+      ],
+      "agent": "infra-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 230
+    },
+    {
+      "id": "m127",
+      "topic": "App metrics — Prometheus + Mimir",
+      "content": "App metrics are now exposed on /metrics, scraped by the Prometheus agent and stored in Grafana Mimir with 13-month retention; dashboards at grafana.pagai.internal. CloudWatch EMF is deprecated for app metrics (kept only for AWS-managed services). Replaces the CloudWatch setup.",
+      "tags": [
+        "observability",
+        "metrics"
+      ],
+      "agent": "infra-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 30
+    },
+    {
+      "id": "m128",
+      "topic": "Ledger — double-entry invariant",
+      "content": "Every money movement writes balanced entries in ledger.entries (sum of debits = sum of credits per transaction_id); a DEFERRABLE constraint trigger enforces it at commit. Never UPDATE an entry — corrections are new reversing entries.",
+      "tags": [
+        "ledger",
+        "accounting"
+      ],
+      "agent": "backend-agent",
+      "importance": "critical",
+      "lang": "en",
+      "created_days_ago": 260
+    },
+    {
+      "id": "m129",
+      "topic": "Liquidação — prazos por meio de pagamento",
+      "content": "O lojista recebe PIX em D+0 (saldo disponível na hora) e cartão de crédito em D+30 por padrão, com antecipação opcional a 1,99% a.m. O cut-off diário é às 22h BRT.",
+      "tags": [
+        "settlement",
+        "payments"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 150
+    },
+    {
+      "id": "m130",
+      "topic": "Outgoing merchant webhooks — retries",
+      "content": "Outgoing merchant webhooks retry up to 8 times over ~24h (1m, 5m, 15m, 1h, 3h, 6h, 12h, 24h) and are signed with HMAC-SHA256 in X-Pagai-Signature. After the final failure the event shows up in the dashboard for manual resend.",
+      "tags": [
+        "webhook",
+        "merchants"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 125
+    },
+    {
+      "id": "m131",
+      "topic": "Mapa dos serviços core",
+      "content": "Serviços core: api-gateway (Kong), auth-svc, payments-svc, pix-svc, ledger-svc, notify-svc e kyc-svc. Comunicação síncrona interna via gRPC; eventos assíncronos via Kafka.",
+      "tags": [
+        "architecture",
+        "services"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 280
+    },
+    {
+      "id": "m132",
+      "topic": "Kong gateway — plugins and config",
+      "content": "Kong 3.7 runs the api-gateway with plugins: jwt (RS256 validation using the JWKS from auth-svc), rate-limiting-advanced backed by redis-ratelimit, and correlation-id. Declarative config in infra/kong/kong.yaml, applied with deck sync.",
+      "tags": [
+        "gateway",
+        "kong",
+        "infra"
+      ],
+      "agent": "infra-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 135
+    },
+    {
+      "id": "m133",
+      "topic": "Custos — orçamento AWS",
+      "content": "Orçamento AWS de US$ 48k/mês, com alerta no AWS Budgets em 80% e 100%. Maiores custos: Aurora (31%), EKS/EC2 (27%) e MSK (12%). Revisão de custos toda primeira quinta-feira do mês.",
+      "tags": [
+        "aws",
+        "cost",
+        "finops"
+      ],
+      "agent": "infra-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 60
+    },
+    {
+      "id": "m134",
+      "topic": "Custos — política de instâncias spot",
+      "content": "Spot só é permitido no pagai-nonprod e nos workers do Airflow; node groups de produção são on-demand, com Compute Savings Plan de 1 ano cobrindo ~70% da carga base.",
+      "tags": [
+        "aws",
+        "cost",
+        "k8s"
+      ],
+      "agent": "infra-agent",
+      "importance": "low",
+      "lang": "pt",
+      "created_days_ago": 90
+    },
+    {
+      "id": "m135",
+      "topic": "Lake — retenção por camada",
+      "content": "Eventos brutos no lake (camada bronze) ficam 13 meses; camadas silver e gold são mantidas por 5 anos. Dados de clientes com pedido de exclusão LGPD são removidos em até 15 dias pelo job lgpd-erasure.",
+      "tags": [
+        "data",
+        "retention",
+        "lgpd"
+      ],
+      "agent": "data-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 70
+    },
+    {
+      "id": "m136",
+      "topic": "fraud-score — latency budget and fallback",
+      "content": "fraud-score inference must answer within 120 ms p99 because it sits in the PIX send path; it is served by a Python FastAPI on 3 c7g.xlarge pods with the model in memory. On timeout we fall back to rules only: fail-open below R$ 500, fail-closed above.",
+      "tags": [
+        "fraud",
+        "ml",
+        "latency"
+      ],
+      "agent": "data-agent",
+      "importance": "critical",
+      "lang": "en",
+      "created_days_ago": 50
+    },
+    {
+      "id": "m137",
+      "topic": "Sandbox para integração dos lojistas",
+      "content": "Lojistas testam a integração em sandbox.pagai.com.br, que usa o simulador de PSP e nunca move dinheiro real. Chaves de sandbox começam com sk_test_ e as de produção com sk_live_.",
+      "tags": [
+        "sandbox",
+        "merchants",
+        "api"
+      ],
+      "agent": "qa-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 145
+    },
+    {
+      "id": "m138",
+      "topic": "Checkout bundle size budget",
+      "content": "The checkout route JS budget is 180 KB gzipped; CI fails through size-limit if it's exceeded. Charting libraries must be lazy-loaded, and we dropped moment.js for date-fns to save ~60 KB.",
+      "tags": [
+        "frontend",
+        "performance"
+      ],
+      "agent": "frontend-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 80
+    },
+    {
+      "id": "m139",
+      "topic": "Design system Ipê",
+      "content": "O design system interno 'Ipê' fica em packages/ui, documentado no Storybook (storybook.pagai.internal). Componente novo só entra no Ipê depois de review do designer e teste visual com screenshots do Playwright.",
+      "tags": [
+        "frontend",
+        "design-system"
+      ],
+      "agent": "frontend-agent",
+      "importance": "low",
+      "lang": "pt",
+      "created_days_ago": 100
+    },
+    {
+      "id": "m140",
+      "topic": "Paginação nas APIs de listagem",
+      "content": "Endpoints de listagem usam paginação por cursor (?cursor=&limit=, limit máximo 100); o cursor é um base64 opaco de (created_at, id). Paginação por offset é proibida em tabelas com mais de 100 mil linhas.",
+      "tags": [
+        "api",
+        "conventions",
+        "pagination"
+      ],
+      "agent": "backend-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 190
+    },
+    {
+      "id": "m141",
+      "topic": "Revisão de acessos à produção",
+      "content": "Revisão trimestral de acessos à AWS e ao banco de produção. Acesso de leitura ao prod é via SSO com sessão de 1h e aprovação no Slack #access-requests. Ninguém tem escrita direta; só pela role de break-glass.",
+      "tags": [
+        "security",
+        "access",
+        "aws"
+      ],
+      "agent": "security-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 95
+    },
+    {
+      "id": "m142",
+      "topic": "Break-glass role procedure",
+      "content": "The break-glass IAM role pagai-breakglass requires MFA and two-person approval in #access-requests. Every assume-role fires a critical alert to security-agent and must be justified in the incident channel within 1h.",
+      "tags": [
+        "security",
+        "access",
+        "incident"
+      ],
+      "agent": "infra-agent",
+      "importance": "critical",
+      "lang": "en",
+      "created_days_ago": 95
+    },
+    {
+      "id": "m143",
+      "topic": "Comprovante de PIX por e-mail e push",
+      "content": "O comprovante de PIX é enviado por e-mail e push em até 30s após a confirmação (template pix-receipt-v4). O cliente pode desativar o e-mail, mas o push transacional não pode ser desativado.",
+      "tags": [
+        "notifications",
+        "pix",
+        "email"
+      ],
+      "agent": "backend-agent",
+      "importance": "low",
+      "lang": "pt",
+      "created_days_ago": 70
+    },
+    {
+      "id": "m144",
+      "topic": "Contract tests with merchant SDKs",
+      "content": "Public API contract tests use Pact: the Node and PHP merchant SDKs publish pacts to pact-broker.pagai.internal and payments-svc verifies them in CI. A breaking provider change fails the can-i-deploy step.",
+      "tags": [
+        "testing",
+        "contracts",
+        "api"
+      ],
+      "agent": "qa-agent",
+      "importance": "medium",
+      "lang": "en",
+      "created_days_ago": 115
+    },
+    {
+      "id": "m145",
+      "topic": "Split de pagamento para marketplaces",
+      "content": "Split de pagamento lançado em agosto/2026: até 10 recebedores por transação, com a taxa cobrada do recebedor principal. Disponível para cartão e PIX, não para boleto.",
+      "tags": [
+        "product",
+        "split",
+        "marketplace"
+      ],
+      "agent": "pm-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 55
+    },
+    {
+      "id": "m146",
+      "topic": "PIX Automático — mandate storage",
+      "content": "PIX Automático mandates are stored in recurring.mandates with the state machine PENDING → ACTIVE → CANCELLED | EXPIRED. Charges are scheduled 2–10 days before the due date per BACEN spec. Code in src/pix/automatico/.",
+      "tags": [
+        "pix",
+        "recurring"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 30
+    },
+    {
+      "id": "m147",
+      "topic": "Redis — versão e topologia",
+      "content": "Os Redis gerenciados (cache-merchant e redis-ratelimit) usam ElastiCache Redis OSS 7.1, cluster mode desabilitado, 1 primário + 1 réplica em AZs diferentes e failover automático em ~30s.",
+      "tags": [
+        "redis",
+        "infra"
+      ],
+      "agent": "infra-agent",
+      "importance": "medium",
+      "lang": "pt",
+      "created_days_ago": 120
+    },
+    {
+      "id": "m148",
+      "topic": "Cache HTTP nos endpoints de catálogo",
+      "content": "GET /v1/banks e GET /v1/mcc-codes respondem com Cache-Control: public, max-age=86400 e ficam cacheados no CloudFront; essas listas mudam no máximo uma vez por mês.",
+      "tags": [
+        "cache",
+        "api"
+      ],
+      "agent": "backend-agent",
+      "importance": "low",
+      "lang": "pt",
+      "created_days_ago": 150
+    },
+    {
+      "id": "m149",
+      "topic": "Antifraude — regras estáticas no envio de PIX",
+      "content": "Regras estáticas antifraude: PIX acima de R$ 2.000 para chave cadastrada há menos de 24h exige confirmação biométrica; 3 PIX seguidos para a mesma chave nova em 10 min bloqueiam o envio temporariamente.",
+      "tags": [
+        "fraud",
+        "pix",
+        "rules"
+      ],
+      "agent": "backend-agent",
+      "importance": "high",
+      "lang": "pt",
+      "created_days_ago": 45
+    },
+    {
+      "id": "m150",
+      "topic": "Debezium — heartbeats and slot-lag alert",
+      "content": "After INC-0498 (replication slot bloat to 80 GB), Debezium emits heartbeats every 10 s via heartbeat.action.query on table cdc.heartbeat, and infra-agent is paged when slot lag exceeds 2 GB.",
+      "tags": [
+        "data",
+        "cdc",
+        "alerting"
+      ],
+      "agent": "data-agent",
+      "importance": "high",
+      "lang": "en",
+      "created_days_ago": 20
+    }
+  ],
+  "queries": [
+    {
+      "id": "q001",
+      "query": "What happens if someone presents a refresh token that was already rotated?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m002"
+      ]
+    },
+    {
+      "id": "q002",
+      "query": "Por que não usamos sessão guardada no servidor para autenticar?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m001"
+      ]
+    },
+    {
+      "id": "q003",
+      "query": "How many wrong password attempts before a customer gets locked out?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m006"
+      ]
+    },
+    {
+      "id": "q004",
+      "query": "Usuários do painel administrativo podem usar SMS como segundo fator?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m005"
+      ]
+    },
+    {
+      "id": "q005",
+      "query": "What happens when the merchant settings cache runs out of memory?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m008"
+      ]
+    },
+    {
+      "id": "q006",
+      "query": "Os contadores de limite de requisições podem sumir se a memória do Redis lotar?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m009"
+      ]
+    },
+    {
+      "id": "q007",
+      "query": "What timeout do we use when the PSP notifies us about a PIX refund?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m013"
+      ]
+    },
+    {
+      "id": "q008",
+      "query": "How fast must we answer the PSP when a PIX charge is paid, and what if processing is slow?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m012"
+      ]
+    },
+    {
+      "id": "q009",
+      "query": "Depois de quanto tempo um QR code de cobrança com valor deixa de valer?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m014"
+      ]
+    },
+    {
+      "id": "q010",
+      "query": "O PayBridge retorna erro se eu criar uma cobrança com um txid repetido?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m015"
+      ]
+    },
+    {
+      "id": "q011",
+      "query": "When does the daily job that matches the PSP statement against our books run, and where do mismatches go?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m017"
+      ]
+    },
+    {
+      "id": "q012",
+      "query": "A gente armazena o número completo do cartão em algum lugar?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m021"
+      ]
+    },
+    {
+      "id": "q013",
+      "query": "Should I use decimal or float for money amounts in backend code?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m022"
+      ]
+    },
+    {
+      "id": "q014",
+      "query": "How do I add an index to a huge table without locking writes?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m026"
+      ]
+    },
+    {
+      "id": "q015",
+      "query": "Como as migrations de banco rodam em produção?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m025"
+      ]
+    },
+    {
+      "id": "q016",
+      "query": "Can I use named prepared statements on our Postgres connections?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m029"
+      ]
+    },
+    {
+      "id": "q017",
+      "query": "Como desfaço um deploy ruim em produção?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m036"
+      ]
+    },
+    {
+      "id": "q018",
+      "query": "What are our recovery point and recovery time objectives if São Paulo region goes down?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m039"
+      ]
+    },
+    {
+      "id": "q019",
+      "query": "Onde eu cadastro uma credencial nova de um serviço pra ela chegar no pod?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m040"
+      ]
+    },
+    {
+      "id": "q020",
+      "query": "What naming pattern should a new event stream topic follow?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m043"
+      ]
+    },
+    {
+      "id": "q021",
+      "query": "O que acontece com uma mensagem que falha várias vezes no consumidor?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m044"
+      ]
+    },
+    {
+      "id": "q022",
+      "query": "Which fields are mandatory in service logs and what must never be logged?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m053"
+      ]
+    },
+    {
+      "id": "q023",
+      "query": "Quais alertas acordam o plantonista e quais só vão pro Slack?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m054"
+      ]
+    },
+    {
+      "id": "q024",
+      "query": "Can I use Redux for state in new web pages?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m057"
+      ]
+    },
+    {
+      "id": "q025",
+      "query": "Por que o checkout fica consultando o status em vez de usar SSE pra saber se o PIX foi pago?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m064"
+      ]
+    },
+    {
+      "id": "q026",
+      "query": "What restrictions apply when the app runs on a jailbroken or rooted phone?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m067"
+      ]
+    },
+    {
+      "id": "q027",
+      "query": "Como os CPFs são protegidos quando chegam no data lake?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m075"
+      ]
+    },
+    {
+      "id": "q028",
+      "query": "What signals does the anti-fraud model use and how often is it retrained?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m076"
+      ]
+    },
+    {
+      "id": "q029",
+      "query": "O que causou o crédito em dobro de PIX em fevereiro?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m083"
+      ]
+    },
+    {
+      "id": "q030",
+      "query": "Why did the connection pooler go down during the Mother's Day peak?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m084"
+      ]
+    },
+    {
+      "id": "q031",
+      "query": "O que entra na primeira versão da recorrência via PIX?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m089"
+      ]
+    },
+    {
+      "id": "q032",
+      "query": "What's the night-time PIX cap for individual customers?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m094"
+      ]
+    },
+    {
+      "id": "q033",
+      "query": "Por que a validação da assinatura do webhook do Kobalt falha quando uso express.json?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m105"
+      ]
+    },
+    {
+      "id": "q034",
+      "query": "How does on-call escalation work if the primary doesn't acknowledge the page?",
+      "lang": "en",
+      "type": "cross_lingual",
+      "relevant": [
+        "m110"
+      ]
+    },
+    {
+      "id": "q035",
+      "query": "Posso dar UPDATE numa entrada contábil pra corrigir um valor errado?",
+      "lang": "pt",
+      "type": "cross_lingual",
+      "relevant": [
+        "m128"
+      ]
+    },
+    {
+      "id": "q036",
+      "query": "Quantas chamadas por segundo um lojista pode fazer com a mesma credencial de integração?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m010"
+      ]
+    },
+    {
+      "id": "q037",
+      "query": "If a client retries charge creation with the same dedupe header but a different payload, what do we return?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m011"
+      ]
+    },
+    {
+      "id": "q038",
+      "query": "Como é montado o identificador da transação que mandamos pro PSP?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m016"
+      ]
+    },
+    {
+      "id": "q039",
+      "query": "How long after paying can a customer still get their money returned?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m018"
+      ]
+    },
+    {
+      "id": "q040",
+      "query": "Se o cliente pagar o boleto atrasado, ainda aceita? Tem cobrança extra?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m023"
+      ]
+    },
+    {
+      "id": "q041",
+      "query": "How many days do we have to contest a disputed card transaction?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m024"
+      ]
+    },
+    {
+      "id": "q042",
+      "query": "Is it safe to query the secondary database right after inserting a payment?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m030"
+      ]
+    },
+    {
+      "id": "q043",
+      "query": "Por quanto tempo guardamos as cópias de segurança do banco principal?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m031"
+      ]
+    },
+    {
+      "id": "q044",
+      "query": "When a customer asks us to delete their personal data, do we remove the whole record?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m032"
+      ]
+    },
+    {
+      "id": "q045",
+      "query": "O ambiente de homologação recebe as mudanças sozinho depois que eu faço merge?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m034"
+      ]
+    },
+    {
+      "id": "q046",
+      "query": "What traffic steps does a prod release go through and when does it stop on its own?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m035"
+      ]
+    },
+    {
+      "id": "q047",
+      "query": "Where is the infrastructure-as-code state kept and how do we prevent two applies at once?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m038"
+      ]
+    },
+    {
+      "id": "q048",
+      "query": "Qual versão do broker de mensageria usamos e onde ficam os schemas dos eventos?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m045"
+      ]
+    },
+    {
+      "id": "q049",
+      "query": "Um teste instável está quebrando meu PR, o que eu faço com ele?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m047"
+      ]
+    },
+    {
+      "id": "q050",
+      "query": "What fraction of requests get distributed traces recorded?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m052"
+      ]
+    },
+    {
+      "id": "q051",
+      "query": "Qual a meta de disponibilidade e de latência do endpoint de criar cobrança?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m055"
+      ]
+    },
+    {
+      "id": "q052",
+      "query": "How do I check that a company tax ID typed in a web form is valid?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m060"
+      ]
+    },
+    {
+      "id": "q053",
+      "query": "Como ligo ou desligo uma funcionalidade nova na tela sem fazer deploy?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m061"
+      ]
+    },
+    {
+      "id": "q054",
+      "query": "Quais requisitos de inclusão para pessoas com deficiência o fluxo de pagamento precisa cumprir?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m063"
+      ]
+    },
+    {
+      "id": "q055",
+      "query": "Dá pra mandar correção pro celular do cliente sem passar pela revisão da loja?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m065"
+      ]
+    },
+    {
+      "id": "q056",
+      "query": "Is there a cap on promotional notifications per customer?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m068"
+      ]
+    },
+    {
+      "id": "q057",
+      "query": "How do row changes in the main database get streamed into Kafka?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m073"
+      ]
+    },
+    {
+      "id": "q058",
+      "query": "Quantas vezes uma tarefa do orquestrador de pipelines é repetida e qual o prazo pros fluxos financeiros?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m074"
+      ]
+    },
+    {
+      "id": "q059",
+      "query": "What layers and name prefixes do our analytics transformation models use?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m077"
+      ]
+    },
+    {
+      "id": "q060",
+      "query": "Que ferramenta usamos pra subir um banco de verdade nos testes de integração?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m078"
+      ]
+    },
+    {
+      "id": "q061",
+      "query": "How much traffic can the charge creation endpoint take before something saturates?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m081"
+      ]
+    },
+    {
+      "id": "q062",
+      "query": "Por que os recibos enviados por e-mail atrasaram horas naquele incidente?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m086"
+      ]
+    },
+    {
+      "id": "q063",
+      "query": "What did we change after a test credential got exposed publicly?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m087"
+      ]
+    },
+    {
+      "id": "q064",
+      "query": "Quanto o lojista paga por cada transferência instantânea recebida?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m090"
+      ]
+    },
+    {
+      "id": "q065",
+      "query": "What does a seller have to go through before being approved on the platform?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m093"
+      ]
+    },
+    {
+      "id": "q066",
+      "query": "Em que fuso horário as datas ficam gravadas no banco?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m100"
+      ]
+    },
+    {
+      "id": "q067",
+      "query": "Am I allowed to use an untyped escape hatch in production TypeScript code?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m101"
+      ]
+    },
+    {
+      "id": "q068",
+      "query": "A verificação de identidade do lojista ficou parada muito tempo, devo recusar o cadastro?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m104"
+      ]
+    },
+    {
+      "id": "q069",
+      "query": "When is a postmortem required and how soon must it be written?",
+      "lang": "en",
+      "type": "paraphrase",
+      "relevant": [
+        "m113"
+      ]
+    },
+    {
+      "id": "q070",
+      "query": "Como protegemos o telefone e a chave PIX do cliente no banco de dados?",
+      "lang": "pt",
+      "type": "paraphrase",
+      "relevant": [
+        "m118"
+      ]
+    },
+    {
+      "id": "q071",
+      "query": "INC-0489",
+      "lang": "en",
+      "type": "keyword",
+      "relevant": [
+        "m085"
+      ]
+    },
+    {
+      "id": "q072",
+      "query": "X-Pagai-Signature header",
+      "lang": "en",
+      "type": "keyword",
+      "relevant": [
+        "m130"
+      ]
+    },
+    {
+      "id": "q073",
+      "query": "infra/kong/kong.yaml",
+      "lang": "en",
+      "type": "keyword",
+      "relevant": [
+        "m132"
+      ]
+    },
+    {
+      "id": "q074",
+      "query": "pagai-breakglass",
+      "lang": "en",
+      "type": "keyword",
+      "relevant": [
+        "m142"
+      ]
+    },
+    {
+      "id": "q075",
+      "query": "prefixo sk_test_",
+      "lang": "pt",
+      "type": "keyword",
+      "relevant": [
+        "m137"
+      ]
+    },
+    {
+      "id": "q076",
+      "query": "packages/contracts/src/errors.ts",
+      "lang": "en",
+      "type": "keyword",
+      "relevant": [
+        "m097"
+      ]
+    },
+    {
+      "id": "q077",
+      "query": "splitCents()",
+      "lang": "en",
+      "type": "keyword",
+      "relevant": [
+        "m103"
+      ]
+    },
+    {
+      "id": "q078",
+      "query": "eslint-plugin-boundaries",
+      "lang": "pt",
+      "type": "keyword",
+      "relevant": [
+        "m098"
+      ]
+    },
+    {
+      "id": "q079",
+      "query": "tools/psp-sim port 4010",
+      "lang": "en",
+      "type": "keyword",
+      "relevant": [
+        "m079"
+      ]
+    },
+    {
+      "id": "q080",
+      "query": "E2PAGAIWEB",
+      "lang": "en",
+      "type": "keyword",
+      "relevant": [
+        "m041"
+      ]
+    },
+    {
+      "id": "q081",
+      "query": "tabela kyc.cnpj_cache",
+      "lang": "pt",
+      "type": "keyword",
+      "relevant": [
+        "m108"
+      ]
+    },
+    {
+      "id": "q082",
+      "query": "security/exceptions.yaml",
+      "lang": "en",
+      "type": "keyword",
+      "relevant": [
+        "m117"
+      ]
+    },
+    {
+      "id": "q083",
+      "query": "release-please",
+      "lang": "pt",
+      "type": "keyword",
+      "relevant": [
+        "m099"
+      ]
+    },
+    {
+      "id": "q084",
+      "query": "ses-bounces SNS topic",
+      "lang": "en",
+      "type": "keyword",
+      "relevant": [
+        "m109"
+      ]
+    },
+    {
+      "id": "q085",
+      "query": "generateFakeCpf",
+      "lang": "pt",
+      "type": "keyword",
+      "relevant": [
+        "m080"
+      ]
+    },
+    {
+      "id": "q086",
+      "query": "Quanto tempo dura o access token hoje?",
+      "lang": "pt",
+      "type": "update",
+      "relevant": [
+        "m004"
+      ]
+    },
+    {
+      "id": "q087",
+      "query": "Which provider settles our PIX transactions and is there a backup?",
+      "lang": "en",
+      "type": "update",
+      "relevant": [
+        "m020"
+      ]
+    },
+    {
+      "id": "q088",
+      "query": "Qual versão do Postgres está rodando no cluster principal?",
+      "lang": "pt",
+      "type": "update",
+      "relevant": [
+        "m028"
+      ]
+    },
+    {
+      "id": "q089",
+      "query": "What test coverage threshold does CI enforce on pull requests?",
+      "lang": "en",
+      "type": "update",
+      "relevant": [
+        "m049"
+      ]
+    },
+    {
+      "id": "q090",
+      "query": "How should I style a new React component in the web app?",
+      "lang": "en",
+      "type": "update",
+      "relevant": [
+        "m059"
+      ]
+    },
+    {
+      "id": "q091",
+      "query": "How often do we ship the mobile app to the stores?",
+      "lang": "en",
+      "type": "update",
+      "relevant": [
+        "m070"
+      ]
+    },
+    {
+      "id": "q092",
+      "query": "Onde ficam as tabelas analíticas pra eu rodar uma consulta de GMV?",
+      "lang": "pt",
+      "type": "update",
+      "relevant": [
+        "m072"
+      ]
+    },
+    {
+      "id": "q093",
+      "query": "Do newly signed merchants get any free PIX transactions?",
+      "lang": "en",
+      "type": "update",
+      "relevant": [
+        "m092"
+      ]
+    },
+    {
+      "id": "q094",
+      "query": "Quantas aprovações um PR precisa pra ser mergeado?",
+      "lang": "pt",
+      "type": "update",
+      "relevant": [
+        "m112"
+      ]
+    },
+    {
+      "id": "q095",
+      "query": "Qual algoritmo usamos pra hashear a senha dos clientes?",
+      "lang": "pt",
+      "type": "update",
+      "relevant": [
+        "m122"
+      ]
+    },
+    {
+      "id": "q096",
+      "query": "How is an account balance computed when the statement API asks for it?",
+      "lang": "en",
+      "type": "update",
+      "relevant": [
+        "m125"
+      ]
+    },
+    {
+      "id": "q097",
+      "query": "Onde eu publico métricas customizadas de um serviço novo?",
+      "lang": "pt",
+      "type": "update",
+      "relevant": [
+        "m127"
+      ]
+    },
+    {
+      "id": "q098",
+      "query": "Redis version, replication and failover",
+      "lang": "en",
+      "type": "filter",
+      "relevant": [
+        "m147"
+      ],
+      "filters": {
+        "agent": "infra-agent"
+      }
+    },
+    {
+      "id": "q099",
+      "query": "Qual o timeout configurado no webhook?",
+      "lang": "pt",
+      "type": "filter",
+      "relevant": [
+        "m013"
+      ],
+      "filters": {
+        "tags": [
+          "refund"
+        ]
+      }
+    },
+    {
+      "id": "q100",
+      "query": "Como funciona o deploy?",
+      "lang": "pt",
+      "type": "filter",
+      "relevant": [
+        "m034"
+      ],
+      "filters": {
+        "tags": [
+          "staging"
+        ]
+      }
+    },
+    {
+      "id": "q101",
+      "query": "What happened in the incident and what did we change afterwards?",
+      "lang": "en",
+      "type": "filter",
+      "relevant": [
+        "m087"
+      ],
+      "filters": {
+        "agent": "security-agent",
+        "tags": [
+          "incident"
+        ]
+      }
+    },
+    {
+      "id": "q102",
+      "query": "What PIX limits apply to individual customers?",
+      "lang": "en",
+      "type": "filter",
+      "relevant": [
+        "m094",
+        "m095"
+      ],
+      "filters": {
+        "tags": [
+          "limits"
+        ]
+      }
+    },
+    {
+      "id": "q103",
+      "query": "Como funciona o acesso emergencial à conta AWS de produção?",
+      "lang": "pt",
+      "type": "filter",
+      "relevant": [
+        "m142"
+      ],
+      "filters": {
+        "agent": "infra-agent"
+      }
+    },
+    {
+      "id": "q104",
+      "query": "O que acontece quando o antifraude não responde a tempo?",
+      "lang": "pt",
+      "type": "filter",
+      "relevant": [
+        "m136"
+      ],
+      "filters": {
+        "agent": "data-agent"
+      }
+    },
+    {
+      "id": "q105",
+      "query": "How do we verify webhook signatures?",
+      "lang": "en",
+      "type": "filter",
+      "relevant": [
+        "m105"
+      ],
+      "filters": {
+        "tags": [
+          "kobalt"
+        ]
+      }
+    },
+    {
+      "id": "q106",
+      "query": "What has to pass before the app goes to the stores?",
+      "lang": "en",
+      "type": "filter",
+      "relevant": [
+        "m082"
+      ],
+      "filters": {
+        "agent": "qa-agent",
+        "tags": [
+          "mobile"
+        ]
+      }
+    },
+    {
+      "id": "q107",
+      "query": "Por quanto tempo os eventos brutos ficam guardados?",
+      "lang": "pt",
+      "type": "filter",
+      "relevant": [
+        "m135"
+      ],
+      "filters": {
+        "tags": [
+          "lgpd"
+        ]
+      }
+    },
+    {
+      "id": "q108",
+      "query": "When the gateway throttles a merchant, where are the counters stored and what are the limits per key?",
+      "lang": "en",
+      "type": "multi_hop",
+      "relevant": [
+        "m132",
+        "m009",
+        "m010"
+      ]
+    },
+    {
+      "id": "q109",
+      "query": "Quais são todos os timeouts de webhook do PIX que configuramos?",
+      "lang": "pt",
+      "type": "multi_hop",
+      "relevant": [
+        "m012",
+        "m013"
+      ]
+    },
+    {
+      "id": "q110",
+      "query": "Before shipping a PIX change to production, what reviews, approvals and rollout steps apply?",
+      "lang": "en",
+      "type": "multi_hop",
+      "relevant": [
+        "m033",
+        "m035",
+        "m114"
+      ]
+    },
+    {
+      "id": "q111",
+      "query": "Como um pagamento PIX confirmado vira crédito sem duplicar, mesmo se o consumer rebalancear?",
+      "lang": "pt",
+      "type": "multi_hop",
+      "relevant": [
+        "m012",
+        "m083"
+      ]
+    },
+    {
+      "id": "q112",
+      "query": "Besides the ML score, what rules block or challenge a customer sending a PIX?",
+      "lang": "en",
+      "type": "multi_hop",
+      "relevant": [
+        "m149",
+        "m067"
+      ]
+    },
+    {
+      "id": "q113",
+      "query": "Me dá o panorama do PIX Automático: escopo do produto e como as autorizações são guardadas.",
+      "lang": "pt",
+      "type": "multi_hop",
+      "relevant": [
+        "m089",
+        "m146"
+      ]
+    },
+    {
+      "id": "q114",
+      "query": "Which core services exist and how does the edge gateway validate tokens before reaching them?",
+      "lang": "en",
+      "type": "multi_hop",
+      "relevant": [
+        "m131",
+        "m132"
+      ]
+    },
+    {
+      "id": "q115",
+      "query": "Onde devem ficar os segredos e o que mudou depois que uma chave vazou?",
+      "lang": "pt",
+      "type": "multi_hop",
+      "relevant": [
+        "m040",
+        "m087"
+      ]
+    },
+    {
+      "id": "q116",
+      "query": "How and when do merchants get paid for PIX, and how much do we charge them?",
+      "lang": "en",
+      "type": "multi_hop",
+      "relevant": [
+        "m129",
+        "m090"
+      ]
+    },
+    {
+      "id": "q117",
+      "query": "O que precisamos saber sobre certificados TLS do endpoint que recebe webhooks do PayBridge?",
+      "lang": "pt",
+      "type": "multi_hop",
+      "relevant": [
+        "m106",
+        "m085"
+      ]
+    },
+    {
+      "id": "q118",
+      "query": "Where can I test refund flows if the vendor sandbox never calls back, and what do merchants use for testing?",
+      "lang": "en",
+      "type": "multi_hop",
+      "relevant": [
+        "m079",
+        "m137"
+      ]
+    },
+    {
+      "id": "q119",
+      "query": "Quais são as regras de retenção que temos para logs, backups do banco e dados do lake?",
+      "lang": "pt",
+      "type": "multi_hop",
+      "relevant": [
+        "m053",
+        "m031",
+        "m135"
+      ]
+    },
+    {
+      "id": "q120",
+      "query": "How does a customer get notified about a received PIX — channels, delivery mechanism and opt-out rules?",
+      "lang": "en",
+      "type": "multi_hop",
+      "relevant": [
+        "m068",
+        "m143"
+      ]
+    }
+  ]
+}

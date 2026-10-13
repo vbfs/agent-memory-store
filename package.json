@@ -1,17 +1,23 @@
 {
   "name": "agent-memory-store",
-  "version": "0.0.9",
-  "description": "Local-first MCP memory server for multi-agent systems. Hybrid search (BM25 + semantic embeddings), SQLite-backed, zero-config.",
+  "version": "0.1.0",
+  "description": "Shared, persistent memory for teams of AI agents over MCP. Hybrid search (SQLite FTS5 + local multilingual embeddings), safe for many agent processes, zero external services.",
   "type": "module",
-  "exports": "./src/index.js",
+  "exports": {
+    ".": "./src/store/memory-store.js",
+    "./embeddings": "./src/embeddings.js"
+  },
   "bin": {
     "agent-memory-store": "./src/index.js"
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test src/__tests__/store.test.js",
-    "lint": "node --check src/bm25.js src/store.js src/index.js src/db.js src/embeddings.js src/search.js src/migrate.js",
-    "bench:longmemeval": "node benchmarks/longmemeval_bench.js"
+    "test": "node --no-warnings --test \"test/*.test.js\"",
+    "lint": "node --check src/index.js && node --check src/server.js && node --check src/embeddings.js && node --check src/migrate.js && node --check src/store/memory-store.js",
+    "bench": "node --no-warnings benchmarks/bench.js",
+    "bench:golden": "node --no-warnings benchmarks/golden.js",
+    "bench:tune-fusion": "node --no-warnings benchmarks/tune-fusion.js",
+    "bench:longmemeval": "node --no-warnings benchmarks/longmemeval.js"
   },
   "keywords": [
     "mcp",
@@ -42,15 +48,16 @@
   },
   "homepage": "https://github.com/vbfs/agent-memory-store#readme",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.13.0"
   },
   "files": [
     "src/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "skills/"
   ],
   "dependencies": {
-    "@huggingface/transformers": "^3.0.0",
+    "@huggingface/transformers": "3.8.1",
     "@modelcontextprotocol/sdk": "^1.28.0",
     "gray-matter": "^4.0.3",
     "zod": "^4.3.6"

@@ -2,3 +2,4 @@ node_modules
 .agent-memory-store
 .claude
 benchmarks/.cache
+.DS_Store
