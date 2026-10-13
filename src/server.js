@@ -33,6 +33,7 @@ const DEFAULT_AGENT = process.env.AGENT_MEMORY_AGENT || "global";
 const INSTRUCTIONS = `Persistent memory shared by every agent working in this project.
 - Before acting on a task, call search_context with what you need to know (decisions, conventions, prior outputs). Queries can be in any language.
 - After a decision, discovery or output others will need, call write_context with a specific topic, the content with its rationale, and a few lowercase tags.
+- Always pass your role as \`agent\` (e.g. "backend-agent") on write_context and set_state, using the same id every session, so others know who wrote what.
 - To change an existing memory, pass its id to write_context (updates in place). If write_context reports possible duplicates, update one of them instead of keeping both.
 - Use get_state/set_state for small mutable values (phase, run id, flags). Pass expected_version to set_state when several agents may write the same key.
 - Never store secrets; store where they live instead.`;
