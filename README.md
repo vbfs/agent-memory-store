@@ -105,6 +105,7 @@ server instructions). For multi-agent pipelines, add
 - Before a task: `search_context` for prior decisions, conventions and outputs (any language).
 - After a decision, output or discovery others need: `write_context` with a specific topic,
   the content with its rationale, and 1–4 lowercase tags.
+- Always pass your role as `agent` (e.g. `backend-agent`) on writes, same id every session.
 - To change a memory, pass its `id` to `write_context`. Merge reported duplicates.
 - Shared mutable values (phase, owner, run id): `get_state` / `set_state` with `expected_version`.
 - Never store secrets — store where they live.

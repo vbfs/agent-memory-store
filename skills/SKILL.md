@@ -1,6 +1,6 @@
 ---
 name: agent-memory
-description: "How to use the shared agent memory (agent-memory-store MCP tools: search_context, write_context, read_context, list_context, delete_context, get_state, set_state). Use whenever these tools are available and you start a task, receive a handoff, are unsure about a project fact, make a decision, finish a piece of work others depend on, or discover something that changes prior assumptions."
+description: "How to use the shared agent memory (agent-memory-store MCP tools: search_context, write_context, read_context, list_context, delete_context, get_state, set_state). Use whenever these tools are available and you start a task, receive a handoff, are unsure about a project fact, make a decision, finish a piece of work others depend on, discover something that changes prior assumptions, or are asked to install or configure agent memory for a project."
 ---
 
 # Shared agent memory
@@ -37,7 +37,8 @@ write_context({
   topic: "Payments — PIX refund webhook timeout set to 20s",
   content: "Raised from 10s to 20s: the bank's sandbox p99 is 14s (load test PAG-4821). Retries: 3, exponential backoff. Config: services/payments/config/pix.yaml.",
   tags: ["payments", "pix", "decision"],
-  importance: "high"
+  importance: "high",
+  agent: "backend-agent"
 })
 ```
 
@@ -48,6 +49,10 @@ write_context({
 - **Importance**: `critical` = others will break things without it;
   `high` = changes how the next step runs; `medium` default; `low` = ephemeral.
 - **Temporary facts** (rate limits, incident workarounds): set `ttl_days`.
+- **Agent**: always pass `agent` with your role as a stable lowercase id
+  (`backend-agent`, `qa-agent`) — on `write_context` and `set_state` too. It
+  records who wrote what, and lets others filter with
+  `search_context({ ..., agent: "qa-agent" })`. Use the same id in every session.
 
 ## 3. Update, don't duplicate
 
@@ -90,3 +95,45 @@ Finish in this order: `write_context` (your output) → `set_state` (next phase)
 The server rejects API keys, tokens, private keys and passwords in connection
 strings. Write where the secret lives instead ("DATABASE_URL in Vault at
 prod/payments").
+
+## 7. Setting up the memory server (only when asked)
+
+If you are asked to add or configure agent memory for a project:
+
+1. **Node.js ≥ 22.16** is required (`node --version`); older builds lack FTS5.
+2. **Register the server** in the project's `.mcp.json` (shared via git):
+
+   ```json
+   {
+     "mcpServers": {
+       "agent-memory": {
+         "command": "npx",
+         "args": ["-y", "agent-memory-store"],
+         "env": { "AGENT_MEMORY_MODEL": "arctic-embed-m-v2" }
+       }
+     }
+   }
+   ```
+
+   Agents that share this config (e.g. Claude Code subagents) identify
+   themselves by passing `agent` on each call (§2). Only when each agent runs
+   with its own config (separate clients or processes) also set
+   `"AGENT_MEMORY_AGENT": "<agent-id>"` in that agent's `env`, as the default
+   for its writes.
+
+3. **Pick the model from available RAM.** Each agent process loads its own copy:
+
+   | `AGENT_MEMORY_MODEL` | RAM per process | Use when |
+   | --- | --- | --- |
+   | `arctic-embed-m-v2` (default) | ~0.6 GB macOS ARM, ~1.3 GB Linux x64 | agents × RAM fits comfortably in free memory |
+   | `granite-97m-multilingual` | ~0.45 GB | many agents or a small machine; still PT/EN |
+   | `none` | ~64 MB | very constrained machines; keyword search only |
+
+   Check memory first (`sysctl -n hw.memsize` on macOS, `free -g` on Linux)
+   and keep the total under about half of it.
+4. **Same model for every agent on a project.** Write the chosen
+   `AGENT_MEMORY_MODEL` explicitly in every entry; mixed models make the
+   agents keep re-embedding each other's memories.
+5. Add `.agent-memory-store/` to `.gitignore` (the store is local data).
+6. The first start downloads the model (~310 MB for the default); until then
+   search runs in keyword mode and says so in its response.
